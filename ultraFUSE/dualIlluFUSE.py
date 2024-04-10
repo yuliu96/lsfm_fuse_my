@@ -302,24 +302,24 @@ class dualIlluFUSE:
                 )
         if xs is not None:
             boundaryE += xs
-        boundaryE = np.clip(boundaryE, 0, m_o)
+        boundaryE = np.clip(boundaryE, 0, m_o).astype(np.uint16)
         if self.train_params["fast_mode"]:
-            np.save(
+            tifffile.imwrite(
                 os.path.join(
                     save_path,
                     self.sample_params["topillu_saving_name"],
-                    "fusionBoundary_xy_simple_{}.npy".format(
+                    "fusionBoundary_xy_simple_{}.tif".format(
                         "allowBreak" if self.train_params["allow_break"] else "noBreak"
                     ),
                 ),
                 boundaryE,
             )
         else:
-            np.save(
+            tifffile.imwrite(
                 os.path.join(
                     save_path,
                     self.sample_params["topillu_saving_name"],
-                    "fusionBoundary_xy_full_{}.npy".format(
+                    "fusionBoundary_xy_full_{}.tif".format(
                         "allowBreak" if self.train_params["allow_break"] else "noBreak"
                     ),
                 ),
@@ -328,11 +328,11 @@ class dualIlluFUSE:
         del rawPlanes_top_crop, rawPlanes_bottom_crop
 
         print("\nStitching...")
-        boundaryE = np.load(
+        boundaryE = tifffile.imread(
             os.path.join(
                 save_path,
                 self.sample_params["topillu_saving_name"],
-                "fusionBoundary_xy_full_{}.npy".format(
+                "fusionBoundary_xy_full_{}.tif".format(
                     "allowBreak" if self.train_params["allow_break"] else "noBreak"
                 ),
             )
