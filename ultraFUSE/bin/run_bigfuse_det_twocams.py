@@ -12,7 +12,7 @@ import sys
 import traceback
 
 from pathlib import Path
-from ultraFUSE import dualCameraFUSE, get_module_version
+from ultraFUSE import BigFUSE_det_twoCams, get_module_version
 
 ###############################################################################
 
@@ -67,9 +67,9 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--resampleRatio",
+            "--resample_ratio",
             action="store",
-            dest="resampleRatio",
+            dest="resample_ratio",
             default=2,
             type=int,
         )
@@ -300,10 +300,10 @@ def main():
         args = Args()
         dbg = args.debug
 
-        exe = dualCameraFUSE(
+        exe = BigFUSE_det_twoCams(
             args.require_precropping,
             args.precropping_params,
-            args.resampleRatio,
+            args.resample_ratio,
             args.Lambda,
             args.window_size,
             args.poly_order,

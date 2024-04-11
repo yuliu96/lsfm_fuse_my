@@ -13,7 +13,6 @@ def get_module_version():
     return __version__
 
 
-from .dualIlluFUSE import dualIlluFUSE
-
-from .dualCameraFUSE import dualCameraFUSE
-from .pseudoDualCameraFUSE import pseudoDualCameraFUSE
+from .bigfuse_illu import BigFUSE_illu
+from .bigfuse_det_twocams import BigFUSE_det_twoCams
+from .bigfuse_det_rotation import BigFUSE_det_rotation

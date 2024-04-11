@@ -30,13 +30,13 @@ from ultraFUSE.utils import (
 )
 
 
-class dualIlluFUSE:
+class BigFUSE_illu:
     def __init__(
         self,
         require_precropping: bool = True,
         precropping_params: list[int, int, int, int] = [],
         require_flipping: bool = False,
-        resampleRatio: int = 2,
+        resample_ratio: int = 2,
         Lambda: float = 0.1,
         window_size: list[int, int] = [5, 59],
         poly_order: list[int, int] = [3, 3],
@@ -53,7 +53,7 @@ class dualIlluFUSE:
             "require_precropping": require_precropping,
             "precropping_params": precropping_params,
             "require_flipping": require_flipping,
-            "resampleRatio": resampleRatio,
+            "resample_ratio": resample_ratio,
             "Lambda": Lambda,
             "window_size": window_size,
             "poly_order": poly_order,
@@ -244,8 +244,8 @@ class dualIlluFUSE:
             MIP_info,
         )
         s, m_c, n_c = rawPlanes_top_crop.shape
-        m = len(np.arange(m_c)[:: self.train_params["resampleRatio"]])
-        n = len(np.arange(n_c)[:: self.train_params["resampleRatio"]])
+        m = len(np.arange(m_c)[:: self.train_params["resample_ratio"]])
+        n = len(np.arange(n_c)[:: self.train_params["resample_ratio"]])
 
         print("\nSegment sample...")
         if self.train_params["require_segmentation"]:
@@ -258,13 +258,13 @@ class dualIlluFUSE:
                 ),
                 topVol=rawPlanes_top_crop[
                     :,
-                    :: self.train_params["resampleRatio"],
-                    :: self.train_params["resampleRatio"],
+                    :: self.train_params["resample_ratio"],
+                    :: self.train_params["resample_ratio"],
                 ],
                 bottomVol=rawPlanes_bottom_crop[
                     :,
-                    :: self.train_params["resampleRatio"],
-                    :: self.train_params["resampleRatio"],
+                    :: self.train_params["resample_ratio"],
+                    :: self.train_params["resample_ratio"],
                 ],
             )
         else:
@@ -285,7 +285,7 @@ class dualIlluFUSE:
         boundary = self.dualViewFusion(topF, bottomF, segMask, stripeMask)
         boundary = extendBoundary(
             boundary,
-            self.train_params["resampleRatio"],
+            self.train_params["resample_ratio"],
             window_size=self.train_params["window_size"][1],
             poly_order=self.train_params["poly_order"][1],
             cSize=(s, n_c),
@@ -336,7 +336,7 @@ class dualIlluFUSE:
                     "allowBreak" if self.train_params["allow_break"] else "noBreak"
                 ),
             )
-        )
+        ).astype(np.float32)
         reconVol = fusionResult(
             rawPlanesTop,
             rawPlanesBottom,
@@ -403,7 +403,7 @@ class dualIlluFUSE:
         return boundary
 
     def extractNSCTF(self, s, m, n, topVol, bottomVol, segMask, Max):
-        r = self.train_params["resampleRatio"]
+        r = self.train_params["resample_ratio"]
         featureExtrac = NSCTdec(levels=[3, 3, 3], device=self.train_params["device"])
         topF, bottomF = np.empty((s, m, n), dtype=np.float32), np.empty(
             (s, m, n), dtype=np.float32

@@ -72,9 +72,9 @@ setup(
     description="A fusion algorithm in LSFM",
     entry_points={
         "console_scripts": [
-            "dualillufuse=ultraFUSE.bin.run_dualillufuse:main",
-            "dualcamerafuse=ultraFUSE.bin.run_dualcamerafuse:main",
-            "pseudodualcamerafuse=ultraFUSE.bin.run_pseudodualcamerafuse:main",
+            "bigfuse_illu=ultraFUSE.bin.run_bigfuse_illu:main",
+            "bigfuse_det_rotation=ultraFUSE.bin.run_bigfuse_det_rotation:main",
+            "bigfuse_det_twocams=ultraFUSE.bin.run_bigfuse_det_twocams:main",
         ],
     },
     install_requires=requirements,

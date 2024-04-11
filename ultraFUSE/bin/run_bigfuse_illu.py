@@ -12,7 +12,7 @@ import sys
 import traceback
 
 from pathlib import Path
-from ultraFUSE import pseudoDualCameraFUSE, get_module_version
+from ultraFUSE import BigFUSE_illu, get_module_version
 
 ###############################################################################
 
@@ -39,8 +39,8 @@ class Args(argparse.Namespace):
 
     def __parse(self):
         p = argparse.ArgumentParser(
-            prog="run_pseudodualcamerafuse",
-            description="run pseudodualcamerafuse for LSFM images",
+            prog="run_dualillufuse",
+            description="run dualillufuse for LSFM images",
         )
 
         p.add_argument(
@@ -67,9 +67,17 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--resampleRatio",
+            "--require_flipping",
             action="store",
-            dest="resampleRatio",
+            dest="require_flipping",
+            default=False,
+            type=bool,
+        )
+
+        p.add_argument(
+            "--resample_ratio",
+            action="store",
+            dest="resample_ratio",
             default=2,
             type=int,
         )
@@ -155,49 +163,11 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--skip_illuFusion",
-            action="store",
-            dest="skip_illuFusion",
-            default=True,
-            type=bool,
-        )
-
-        p.add_argument(
-            "--destripe_preceded",
-            action="store",
-            dest="destripe_preceded",
-            default=False,
-            type=bool,
-        )
-
-        p.add_argument(
-            "--destripe_params",
-            action="store",
-            dest="destripe_params",
-            default=None,
-            type=dict,
-        )
-
-        p.add_argument(
             "--device",
             action="store",
             dest="device",
             default="cuda",
             type=str,
-        )
-
-        p.add_argument(
-            "--xy_spacing",
-            action="store",
-            dest="xy_spacing",
-            type=float,
-        )
-
-        p.add_argument(
-            "--z_spacing",
-            action="store",
-            dest="z_spacing",
-            type=float,
         )
 
         p.add_argument(
@@ -215,83 +185,35 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--ventral_angle_in_degree",
+            "--top_illu_data",
             action="store",
-            dest="ventral_angle_in_degree",
-            default=None,
-            type=float,
-        )
-
-        p.add_argument(
-            "--dorsal_angle_in_degree",
-            action="store",
-            dest="dorsal_angle_in_degree",
-            default=None,
-            type=float,
-        )
-
-        p.add_argument(
-            "--top_illu_ventral_det_data",
-            action="store",
-            dest="top_illu_ventral_det_data",
+            dest="top_illu_data",
             default=None,
             type=str,
         )
 
         p.add_argument(
-            "--bottom_illu_ventral_det_data",
+            "--bottom_illu_data",
             action="store",
-            dest="bottom_illu_ventral_det_data",
+            dest="bottom_illu_data",
             default=None,
             type=str,
         )
 
         p.add_argument(
-            "--top_illu_dorsal_det_data",
+            "--left_illu_data",
             action="store",
-            dest="top_illu_dorsal_det_data",
+            dest="left_illu_data",
             default=None,
             type=str,
         )
         p.add_argument(
-            "--bottom_illu_dorsal_det_data",
+            "--right_illu_data",
             action="store",
-            dest="bottom_illu_dorsal_det_data",
+            dest="right_illu_data",
             default=None,
             type=str,
         )
-
-        p.add_argument(
-            "--left_illu_ventral_det_data",
-            action="store",
-            dest="left_illu_ventral_det_data",
-            default=None,
-            type=str,
-        )
-
-        p.add_argument(
-            "--right_illu_ventral_det_data",
-            action="store",
-            dest="right_illu_ventral_det_data",
-            default=None,
-            type=str,
-        )
-
-        p.add_argument(
-            "--left_illu_dorsal_det_data",
-            action="store",
-            dest="left_illu_dorsal_det_data",
-            default=None,
-            type=str,
-        )
-        p.add_argument(
-            "--right_illu_dorsal_det_data",
-            action="store",
-            dest="right_illu_dorsal_det_data",
-            default=None,
-            type=str,
-        )
-
         p.add_argument(
             "--save_path",
             action="store",
@@ -302,6 +224,13 @@ class Args(argparse.Namespace):
             "--save_folder",
             action="store",
             dest="save_folder",
+            type=str,
+        )
+        p.add_argument(
+            "--camera_position",
+            action="store",
+            dest="camera_position",
+            default="",
             type=str,
         )
 
@@ -322,10 +251,11 @@ def main():
         args = Args()
         dbg = args.debug
 
-        exe = pseudoDualCameraFUSE(
+        exe = BigFUSE_illu(
             args.require_precropping,
             args.precropping_params,
-            args.resampleRatio,
+            args.require_flipping,
+            args.resample_ratio,
             args.Lambda,
             args.window_size,
             args.poly_order,
@@ -336,28 +266,18 @@ def main():
             args.allow_break,
             args.fast_mode,
             args.require_log,
-            args.skip_illuFusion,
-            args.destripe_preceded,
-            args.destripe_params,
             args.device,
         )
         out = exe.train(
-            args.xy_spacing,
-            args.z_spacing,
             args.data_path,
             args.sample_name,
-            args.ventral_angle_in_degree,
-            args.dorsal_angle_in_degree,
-            args.top_illu_ventral_det_data,
-            args.bottom_illu_ventral_det_data,
-            args.top_illu_dorsal_det_data,
-            args.bottom_illu_dorsal_det_data,
-            args.left_illu_ventral_det_data,
-            args.right_illu_ventral_det_data,
-            args.left_illu_dorsal_det_data,
-            args.right_illu_dorsal_det_data,
+            args.top_illu_data,
+            args.bottom_illu_data,
+            args.left_illu_data,
+            args.right_illu_data,
             args.save_path,
             args.save_folder,
+            args.camera_position,
         )
 
     except Exception as e:

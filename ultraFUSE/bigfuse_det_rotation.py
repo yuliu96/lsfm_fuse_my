@@ -1,4 +1,4 @@
-from ultraFUSE.dualIlluFUSE import dualIlluFUSE
+from ultraFUSE.bigfuse_illu import BigFUSE_illu
 from ultraFUSE.utils import (
     GuidedFilter,
     sgolay2dkernel,
@@ -8,10 +8,11 @@ from ultraFUSE.utils import (
     EM2DPlus,
 )
 from ultraFUSE.NSCT import NSCTdec, NSCTrec
-import torch
+
 from typing import Union, Tuple, Optional, List, Dict
 import dask
 import numpy as np
+import torch
 import os
 from aicsimageio import AICSImage
 import scipy.ndimage as ndimage
@@ -28,9 +29,6 @@ import io
 import copy
 import SimpleITK as sitk
 import tqdm
-import jax.numpy as jnp
-import jax.scipy as jscipy
-import jax
 import gc
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -42,12 +40,12 @@ import torch.nn.functional as F
 import tifffile
 
 
-class dualCameraFUSE:
+class BigFUSE_det_rotation:
     def __init__(
         self,
         require_precropping: bool = True,
         precropping_params: list[int, int, int, int] = [],
-        resampleRatio: int = 2,
+        resample_ratio: int = 2,
         Lambda: float = 0.1,
         window_size: list[int, int] = [5, 59],
         poly_order: list[int, int] = [3, 3],
@@ -61,13 +59,13 @@ class dualCameraFUSE:
         skip_illuFusion: bool = True,
         destripe_preceded: bool = False,
         destripe_params: Dict = None,
-        require_flipping_for_dorsaldet: bool = True,
         device: str = "cuda",
     ):
         self.train_params = {
             "require_precropping": require_precropping,
             "precropping_params": precropping_params,
-            "resampleRatio": resampleRatio,
+            "require_flipping": False,
+            "resample_ratio": resample_ratio,
             "Lambda": Lambda,
             "window_size": window_size,
             "poly_order": poly_order,
@@ -80,16 +78,13 @@ class dualCameraFUSE:
             "require_log": require_log,
             "device": device,
         }
-        self.modelFront = dualIlluFUSE(**self.train_params, require_flipping=False)
-        self.modelBack = dualIlluFUSE(
-            **self.train_params, require_flipping=require_flipping_for_dorsaldet
-        )
+        self.modelFront = BigFUSE_illu(**self.train_params)
+        self.modelBack = BigFUSE_illu(**self.train_params)
         self.train_params.update(
             {
                 "skip_illuFusion": skip_illuFusion,
                 "destripe_preceded": destripe_preceded,
                 "destripe_params": destripe_params,
-                "require_flipping_for_dorsaldet": require_flipping_for_dorsaldet,
             }
         )
         self.train_params["kernel2d"] = torch.from_numpy(
@@ -101,8 +96,12 @@ class dualCameraFUSE:
 
     def train(
         self,
+        xy_spacing: float,
+        z_spacing: float,
         data_path: str = "",
         sample_name: str = "",
+        ventral_angle_in_degree: float = None,
+        dorsal_angle_in_degree: float = None,
         top_illu_ventral_det_data: Union[dask.array.core.Array, str] = None,
         bottom_illu_ventral_det_data: Union[dask.array.core.Array, str] = None,
         top_illu_dorsal_det_data: Union[dask.array.core.Array, str] = None,
@@ -207,12 +206,51 @@ class dualCameraFUSE:
             print("input(s) missing, please check.")
             return
 
+        if (ventral_angle_in_degree is None) and (dorsal_angle_in_degree is None):
+            ventral_info = os.path.join(
+                data_path,
+                sample_name,
+                "infoTXT",
+                self.sample_params["topillu_ventraldet_data_saving_name"]
+                + "_Settings.txt",
+            )
+            dorsal_info = os.path.join(
+                data_path,
+                sample_name,
+                "infoTXT",
+                self.sample_params["topillu_dorsaldet_data_saving_name"]
+                + "_Settings.txt",
+            )
+            if os.path.exists(ventral_info) and os.path.exists(dorsal_info):
+                with io.open(ventral_info, "r", encoding="utf-8") as my_file:
+                    txt_content = my_file.readlines()
+                    for l in txt_content:
+                        if "Angle (degrees) =" in l:
+                            ventral_angle_in_degree = float(
+                                l.split("Angle (degrees) = ")[1]
+                                .strip()
+                                .replace("\n", "")
+                                .replace("\r", "")
+                            )
+                with io.open(dorsal_info, "r", encoding="utf-8") as my_file:
+                    txt_content = my_file.readlines()
+                    for l in txt_content:
+                        if "Angle (degrees) =" in l:
+                            dorsal_angle_in_degree = float(
+                                l.split("Angle (degrees) = ")[1]
+                                .strip()
+                                .replace("\n", "")
+                                .replace("\r", "")
+                            )
+            else:
+                print("angle information is missing.")
+                return
+
         for k in self.sample_params.keys():
             if "saving_name" in k:
                 sub_folder = os.path.join(save_path, self.sample_params[k])
             if not os.path.exists(sub_folder):
                 os.makedirs(sub_folder)
-
         if self.train_params["skip_illuFusion"]:
             if os.path.exists(
                 os.path.join(
@@ -241,7 +279,6 @@ class dualCameraFUSE:
         else:
             illu_flag_dorsal = 1
             illu_flag_ventral = 1
-
         if illu_flag_ventral:
             print("\nFusion along illumination for ventral camera...")
             self.modelFront.train(
@@ -270,6 +307,230 @@ class dualCameraFUSE:
             )
 
         data_path = os.path.join(data_path, sample_name)
+        if not os.path.exists(
+            os.path.join(
+                save_path, self.sample_params["topillu_ventraldet_data_saving_name"]
+            )
+            + "/regInfo{}.npy".format(
+                "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+            )
+        ):
+            print("\nRegister...")
+            print("read in...")
+            if self.train_params["destripe_preceded"]:
+                illu_name_ = illu_name + "+RESULT/{}.tif".format(
+                    self.train_params["destripe_params"]
+                )
+            else:
+                illu_name_ = illu_name + ".tif"
+            respective_view_uint16_handle = AICSImage(
+                os.path.join(
+                    save_path,
+                    self.sample_params["topillu_ventraldet_data_saving_name"],
+                    illu_name_,
+                )
+            )
+            moving_view_uint16_handle = AICSImage(
+                os.path.join(
+                    save_path,
+                    self.sample_params["topillu_dorsaldet_data_saving_name"],
+                    illu_name_,
+                )
+            )
+            respective_view_uint16 = respective_view_uint16_handle.get_image_data(
+                "ZXY" if T_flag else "ZYX", T=0, C=0
+            )
+            moving_view_uint16 = moving_view_uint16_handle.get_image_data(
+                "ZXY" if T_flag else "ZYX", T=0, C=0
+            )
+            print("reg in zx...")
+            yMP_respective = respective_view_uint16.max(2)
+            yMP_moving = moving_view_uint16.max(2)
+            AffineMapZX = coarseRegistrationZX(
+                yMP_respective,
+                yMP_moving,
+                ventral_angle_in_degree,
+                dorsal_angle_in_degree,
+                r=z_spacing / xy_spacing,
+            )
+            del yMP_respective, yMP_moving
+            print("reg in y...")
+            zMP_respective = respective_view_uint16.max(0)
+            zMP_moving = moving_view_uint16.max(0)
+            AffineMapZXY, frontMIP, backMIP = coarseRegistrationY(
+                zMP_respective,
+                zMP_moving,
+                AffineMapZX,
+            )
+            del zMP_respective, zMP_moving
+            print("rigid registration in 3D...")
+            _, m, n = respective_view_uint16.shape
+            a0, b0, c0, d0 = self.segMIP(frontMIP)
+            a1, b1, c1, d1 = self.segMIP(backMIP)
+            infomax = float(max(frontMIP.max(), backMIP.max()))
+            xs, xe, ys, ye = min(c0, c1), max(d0, d1), min(a0, a1), max(b0, b1)
+            x = min(
+                len(np.arange(0, xs)),
+                len(np.arange(xe, m)),
+            )
+            y = min(
+                len(np.arange(0, ys)),
+                len(np.arange(ye, n)),
+            )
+            xs, xe = x, -x if x != 0 else None
+            ys, ye = y, -y if y != 0 else None
+            fineReg(
+                respective_view_uint16,
+                moving_view_uint16,
+                xs,
+                xe,
+                ys,
+                ye,
+                AffineMapZXY,
+                infomax,
+                os.path.join(
+                    save_path, self.sample_params["topillu_ventraldet_data_saving_name"]
+                ),
+                self.train_params["destripe_preceded"],
+            )
+            del respective_view_uint16, moving_view_uint16
+        else:
+            print("\nSkip registration...")
+        print("\nTranslate data...")
+        regInfo = np.load(
+            os.path.join(
+                save_path,
+                self.sample_params["topillu_ventraldet_data_saving_name"],
+                "regInfo{}.npy".format(
+                    "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+                ),
+            ),
+            allow_pickle=True,
+        ).item()
+        AffineMapZXY = regInfo["AffineMapZXY"]
+        zfront = regInfo["zfront"]
+        zback = regInfo["zback"]
+        z = regInfo["z"]
+        m = regInfo["m"]
+        n = regInfo["n"]
+        xcs, xce, ycs, yce = regInfo["region_for_reg"]
+        padding_z = boundaryInclude(
+            regInfo,
+            z + int(np.ceil(AffineMapZXY[0])) if AffineMapZXY[0] > 0 else z,
+            m,
+            n,
+        )
+
+        for f, f_name in zip(
+            ["top", "bottom"] if (not T_flag) else ["left", "right"], ["top", "bottom"]
+        ):
+            if not self.train_params["destripe_preceded"]:
+                if isinstance(locals()[f + "_illu_dorsal_det_data"], str):
+                    f_handle = AICSImage(
+                        os.path.join(data_path, locals()[f + "_illu_dorsal_det_data"])
+                    )
+                else:
+                    f_handle = AICSImage(locals()[f + "_illu_dorsal_det_data"])
+            else:
+                f0 = self.sample_params[f_name + "illu_dorsaldet_data_saving_name"]
+                f_handle = AICSImage(
+                    os.path.join(
+                        save_path,
+                        f0,
+                        f0 + "+RESULT",
+                        self.train_params["destripe_params"] + ".tif",
+                    )
+                )
+            inputs = f_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
+            trans_path = os.path.join(
+                save_path,
+                self.sample_params[f_name + "illu_dorsaldet_data_saving_name"],
+                self.sample_params[f_name + "illu_dorsaldet_data_saving_name"]
+                + "{}_reg.tif".format(
+                    "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+                ),
+            )
+            volumeTranslate(
+                inputs,
+                regInfo,
+                AffineMapZXY,
+                zback,
+                z,
+                m,
+                n,
+                padding_z,
+                trans_path,
+                T_flag,
+                device=self.train_params["device"],
+            )
+            del inputs
+        if not self.train_params["destripe_preceded"]:
+            fl = illu_name + ".tif"
+        else:
+            fl = illu_name + "+RESULT/{}.tif".format(
+                self.train_params["destripe_params"]
+            )
+        f_handle = AICSImage(
+            os.path.join(
+                save_path, self.sample_params["topillu_dorsaldet_data_saving_name"], fl
+            )
+        )
+        inputs = f_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
+        trans_path = os.path.join(
+            save_path,
+            self.sample_params["topillu_dorsaldet_data_saving_name"],
+            illu_name
+            + "{}_reg.tif".format(
+                "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+            ),
+        )
+        volumeTranslate(
+            inputs,
+            regInfo,
+            AffineMapZXY,
+            zback,
+            z,
+            m,
+            n,
+            padding_z,
+            trans_path,
+            T_flag,
+            device=self.train_params["device"],
+        )
+        del inputs
+        fl = "fusionBoundary_xy_{}_{}".format(
+            "simple" if self.train_params["fast_mode"] else "full",
+            "allowBreak" if self.train_params["allow_break"] else "noBreak",
+        )
+        f0 = os.path.join(
+            save_path,
+            self.sample_params["topillu_dorsaldet_data_saving_name"],
+            fl + ".tif",
+        )
+        boundary = tifffile.imread(f0).astype(np.float32)
+        mask = np.arange(m)[None, :, None] > boundary[:, None, :]
+        trans_path = os.path.join(
+            save_path,
+            self.sample_params["topillu_dorsaldet_data_saving_name"],
+            fl
+            + "{}_reg.npy".format(
+                "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+            ),
+        )
+        volumeTranslate(
+            mask,
+            regInfo,
+            AffineMapZXY,
+            zback,
+            z,
+            m,
+            n,
+            padding_z,
+            trans_path,
+            T_flag,
+            device=self.train_params["device"],
+        )
+
         print("\nLocalize sample...")
         print("read in...")
         if not self.train_params["destripe_preceded"]:
@@ -289,14 +550,12 @@ class dualCameraFUSE:
                 save_path,
                 self.sample_params["topillu_dorsaldet_data_saving_name"],
                 illu_name
-                + "{}.tif".format(
+                + "{}_reg.tif".format(
                     "" if (not self.train_params["destripe_preceded"]) else "_destripe"
                 ),
             )
         )
         illu_back = f_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
-        if self.train_params["require_flipping_for_dorsaldet"]:
-            illu_back[:] = np.flip(illu_back, 1)
         cropInfo = self.localizingSample(illu_front.max(0), illu_back.max(0), save_path)
         print(cropInfo)
         if self.train_params["require_precropping"]:
@@ -336,13 +595,13 @@ class dualCameraFUSE:
         segMask = self.segmentSample(
             illu_front[:, xs:xe, ys:ye][
                 :,
-                :: self.train_params["resampleRatio"],
-                :: self.train_params["resampleRatio"],
+                :: self.train_params["resample_ratio"],
+                :: self.train_params["resample_ratio"],
             ],
             illu_back[:, xs:xe, ys:ye][
                 :,
-                :: self.train_params["resampleRatio"],
-                :: self.train_params["resampleRatio"],
+                :: self.train_params["resample_ratio"],
+                :: self.train_params["resample_ratio"],
             ],
             save_path,
         )
@@ -384,52 +643,46 @@ class dualCameraFUSE:
                 )
             )
         rawPlanesTopO = top_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
-        rawPlanesTop = rawPlanesTopO[:, xs:xe, ys:ye]
-        _, m_c, n_c = rawPlanesTop.shape
-        m = len(np.arange(m_c)[:: self.train_params["resampleRatio"]])
-        n = len(np.arange(n_c)[:: self.train_params["resampleRatio"]])
+        rawPlanesToptmp = rawPlanesTopO[:, xs:xe, ys:ye]
+        _, m_c, n_c = rawPlanesToptmp.shape
+        m = len(np.arange(m_c)[:: self.train_params["resample_ratio"]])
+        n = len(np.arange(n_c)[:: self.train_params["resample_ratio"]])
         del rawPlanesTopO
-        if not self.train_params["destripe_preceded"]:
-            if isinstance(
-                locals()["{}_illu_dorsal_det_data".format("left" if T_flag else "top")],
-                str,
-            ):
-                bottom_handle = AICSImage(
-                    os.path.join(
-                        data_path,
-                        locals()[
-                            "{}_illu_dorsal_det_data".format(
-                                "left" if T_flag else "top"
-                            )
-                        ],
-                    )
-                )
-            else:
-                bottom_handle = AICSImage(
-                    locals()[
-                        "{}_illu_dorsal_det_data".format("left" if T_flag else "top")
-                    ]
-                )
-        else:
-            f0 = self.sample_params["topillu_dorsaldet_data_saving_name"]
-            bottom_handle = AICSImage(
-                os.path.join(
-                    save_path,
-                    f0,
-                    f0 + "+RESULT",
-                    self.train_params["destripe_params"] + ".tif",
-                )
+        bottom_handle = AICSImage(
+            os.path.join(
+                save_path,
+                self.sample_params["bottomillu_dorsaldet_data_saving_name"],
+                self.sample_params["bottomillu_dorsaldet_data_saving_name"]
+                + "{}_reg.tif".format(
+                    "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+                ),
             )
-        #####################
+        )
         rawPlanesBottomO = bottom_handle.get_image_data(
             "ZXY" if T_flag else "ZYX", T=0, C=0
         )
-        if self.train_params["require_flipping_for_dorsaldet"]:
-            rawPlanesBottomO[:] = np.flip(rawPlanesBottomO, 1)
         m0, n0 = rawPlanesBottomO.shape[-2:]
         rawPlanesBottom = rawPlanesBottomO[:, xs:xe, ys:ye]
         del rawPlanesBottomO
         s = rawPlanesBottom.shape[0]
+        if rawPlanesToptmp.shape[0] < rawPlanesBottom.shape[0]:
+            rawPlanesTop = np.concatenate(
+                (
+                    rawPlanesToptmp,
+                    np.zeros(
+                        (
+                            rawPlanesBottom.shape[0] - rawPlanesToptmp.shape[0],
+                            rawPlanesBottom.shape[1],
+                            rawPlanesBottom.shape[2],
+                        ),
+                        dtype=np.uint16,
+                    ),
+                ),
+                0,
+            )
+        else:
+            rawPlanesTop = rawPlanesToptmp
+        del rawPlanesToptmp
         topF, bottomF = self.extractNSCTF(
             s,
             m,
@@ -447,7 +700,7 @@ class dualCameraFUSE:
         boundaryE = np.zeros((n0, m0))
         boundaryE[ys:ye, xs:xe] = extendBoundary(
             boundaryRaw,
-            self.train_params["resampleRatio"],
+            self.train_params["resample_ratio"],
             window_size=self.train_params["window_size"][1],
             poly_order=self.train_params["poly_order"][1],
             cSize=(
@@ -467,12 +720,12 @@ class dualCameraFUSE:
                 boundaryE[ys, :][None, :],
                 boundaryE[ye - 1, :][None, :],
             )
-        boundaryETop = np.clip(boundaryE.T, 0, s)
-        np.save(
+        boundaryETop = np.clip(boundaryE.T, 0, s).astype(np.uint16)
+        tifffile.imwrite(
             os.path.join(
                 save_path,
                 self.sample_params["topillu_ventraldet_data_saving_name"],
-                "fusionBoundary_z_{}.npy".format(
+                "fusionBoundary_z_{}.tif".format(
                     "" if (not self.train_params["destripe_preceded"]) else "_destripe"
                 ),
             ),
@@ -518,55 +771,46 @@ class dualCameraFUSE:
                 )
             )
         rawPlanesTopO = top_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
-        rawPlanesTop = rawPlanesTopO[:, xs:xe, ys:ye]
-        _, m_c, n_c = rawPlanesTop.shape
-        m = len(np.arange(m_c)[:: self.train_params["resampleRatio"]])
-        n = len(np.arange(n_c)[:: self.train_params["resampleRatio"]])
+        rawPlanesToptmp = rawPlanesTopO[:, xs:xe, ys:ye]
+        _, m_c, n_c = rawPlanesToptmp.shape
+        m = len(np.arange(m_c)[:: self.train_params["resample_ratio"]])
+        n = len(np.arange(n_c)[:: self.train_params["resample_ratio"]])
         del rawPlanesTopO
-        if not self.train_params["destripe_preceded"]:
-            if isinstance(
-                locals()[
-                    "{}_illu_dorsal_det_data".format("right" if T_flag else "bottom")
-                ],
-                str,
-            ):
-                bottom_handle = AICSImage(
-                    os.path.join(
-                        data_path,
-                        locals()[
-                            "{}_illu_dorsal_det_data".format(
-                                "right" if T_flag else "bottom"
-                            )
-                        ],
-                    )
-                )
-            else:
-                bottom_handle = AICSImage(
-                    locals()[
-                        "{}_illu_dorsal_det_data".format(
-                            "right" if T_flag else "bottom"
-                        )
-                    ]
-                )
-        else:
-            f0 = self.sample_params["bottomillu_dorsaldet_data_saving_name"]
-            bottom_handle = AICSImage(
-                os.path.join(
-                    save_path,
-                    f0,
-                    f0 + "+RESULT",
-                    self.train_params["destripe_params"] + ".tif",
-                )
+        bottom_handle = AICSImage(
+            os.path.join(
+                save_path,
+                self.sample_params["topillu_dorsaldet_data_saving_name"],
+                self.sample_params["topillu_dorsaldet_data_saving_name"]
+                + "{}_reg.tif".format(
+                    "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+                ),
             )
+        )
         rawPlanesBottomO = bottom_handle.get_image_data(
             "ZXY" if T_flag else "ZYX", T=0, C=0
         )
-        if self.train_params["require_flipping_for_dorsaldet"]:
-            rawPlanesBottomO[:] = np.flip(rawPlanesBottomO, 1)
         m0, n0 = rawPlanesBottomO.shape[-2:]
         rawPlanesBottom = rawPlanesBottomO[:, xs:xe, ys:ye]
         del rawPlanesBottomO
         s = rawPlanesBottom.shape[0]
+        if rawPlanesToptmp.shape[0] < rawPlanesBottom.shape[0]:
+            rawPlanesTop = np.concatenate(
+                (
+                    rawPlanesToptmp,
+                    np.zeros(
+                        (
+                            rawPlanesBottom.shape[0] - rawPlanesToptmp.shape[0],
+                            rawPlanesBottom.shape[1],
+                            rawPlanesBottom.shape[2],
+                        ),
+                        dtype=np.uint16,
+                    ),
+                ),
+                0,
+            )
+        else:
+            rawPlanesTop = rawPlanesToptmp
+        del rawPlanesToptmp
         topF, bottomF = self.extractNSCTF(
             s,
             m,
@@ -584,7 +828,7 @@ class dualCameraFUSE:
         boundaryE = np.zeros((n0, m0))
         boundaryE[ys:ye, xs:xe] = extendBoundary(
             boundaryRaw,
-            self.train_params["resampleRatio"],
+            self.train_params["resample_ratio"],
             window_size=self.train_params["window_size"][1],
             poly_order=self.train_params["poly_order"][1],
             cSize=(
@@ -604,12 +848,12 @@ class dualCameraFUSE:
                 boundaryE[ys, :][None, :],
                 boundaryE[ye - 1, :][None, :],
             )
-        boundaryEBottom = np.clip(boundaryE.T, 0, s)
-        np.save(
+        boundaryEBottom = np.clip(boundaryE.T, 0, s).astype(np.uint16)
+        tifffile.imwrite(
             os.path.join(
                 save_path,
                 self.sample_params["bottomillu_ventraldet_data_saving_name"],
-                "fusionBoundary_z_{}.npy".format(
+                "fusionBoundary_z_{}.tif".format(
                     "" if (not self.train_params["destripe_preceded"]) else "_destripe"
                 ),
             ),
@@ -620,47 +864,53 @@ class dualCameraFUSE:
         print("\n\nStitching...")
         print("read in...")
         # "ZXY" if T_flag else "ZYX"
-        boundaryEFront = np.load(
+        boundaryEFront = tifffile.imread(
             os.path.join(
                 save_path,
                 self.sample_params["topillu_ventraldet_data_saving_name"],
-                "fusionBoundary_xy_{}_{}.npy".format(
+                "fusionBoundary_xy_{}_{}.tif".format(
                     "simple" if self.train_params["fast_mode"] else "full",
                     "allowBreak" if self.train_params["allow_break"] else "noBreak",
                 ),
             )
+        ).astype(np.float32)
+        fl = "fusionBoundary_xy_{}_{}".format(
+            "simple" if self.train_params["fast_mode"] else "full",
+            "allowBreak" if self.train_params["allow_break"] else "noBreak",
         )
         boundaryEBack = np.load(
             os.path.join(
                 save_path,
                 self.sample_params["topillu_dorsaldet_data_saving_name"],
-                "fusionBoundary_xy_{}_{}.npy".format(
-                    "simple" if self.train_params["fast_mode"] else "full",
-                    "allowBreak" if self.train_params["allow_break"] else "noBreak",
+                fl
+                + "{}_reg.npy".format(
+                    "" if (not self.train_params["destripe_preceded"]) else "_destripe"
                 ),
             )
         )
-        boundaryTop = np.load(
+        boundaryTop = tifffile.imread(
             os.path.join(
                 save_path,
                 self.sample_params["topillu_ventraldet_data_saving_name"],
-                "fusionBoundary_z_{}.npy".format(
+                "fusionBoundary_z_{}.tif".format(
                     "" if (not self.train_params["destripe_preceded"]) else "_destripe"
                 ),
             )
-        )
-        boundaryBottom = np.load(
+        ).astype(np.float32)
+        boundaryBottom = tifffile.imread(
             os.path.join(
                 save_path,
                 self.sample_params["bottomillu_ventraldet_data_saving_name"],
-                "fusionBoundary_z_{}.npy".format(
+                "fusionBoundary_z_{}.tif".format(
                     "" if (not self.train_params["destripe_preceded"]) else "_destripe"
                 ),
             )
-        )
+        ).astype(np.float32)
         if T_flag:
             boundaryBottom = boundaryBottom.T
             boundaryTop = boundaryTop.T
+            boundaryEBack = boundaryEBack.swapaxes(1, 2)
+
         if not self.train_params["destripe_preceded"]:
             fl = illu_name + ".tif"
         else:
@@ -675,12 +925,15 @@ class dualCameraFUSE:
         illu_front = f_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
         f_handle = AICSImage(
             os.path.join(
-                save_path, self.sample_params["topillu_dorsaldet_data_saving_name"], fl
+                save_path,
+                self.sample_params["topillu_dorsaldet_data_saving_name"],
+                illu_name
+                + "{}_reg.tif".format(
+                    "" if (not self.train_params["destripe_preceded"]) else "_destripe"
+                ),
             )
         )
         illu_back = f_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
-        if self.train_params["require_flipping_for_dorsaldet"]:
-            illu_back[:] = np.flip(illu_back, 1)
         s, m0, n0 = illu_back.shape
         reconVol = fusionResultFour(
             boundaryTop,
@@ -692,6 +945,7 @@ class dualCameraFUSE:
             s,
             m0,
             n0,
+            save_path,
             self.train_params["device"],
             self.sample_params,
             Gaussianr=self.train_params["Gaussian_kernel_size"],
@@ -754,7 +1008,7 @@ class dualCameraFUSE:
         return boundaryRaw, boundarySmooth
 
     def extractNSCTF(self, s, m, n, topVol, bottomVol, device, Max):
-        r = self.train_params["resampleRatio"]
+        r = self.train_params["resample_ratio"]
         featureExtrac = NSCTdec(levels=[3, 3, 3], device=device)
         topF, bottomF = np.empty((s, m, n), dtype=np.float32), np.empty(
             (s, m, n), dtype=np.float32
@@ -908,6 +1162,28 @@ class dualCameraFUSE:
         )
         return cropInfo
 
+    def segMIP(self, maximumProjection, maxv=None, minv=None, th=None):
+        m, n = maximumProjection.shape
+        if th == None:
+            maxv, minv, th = (
+                maximumProjection.max(),
+                maximumProjection.min(),
+                filters.threshold_otsu(maximumProjection),
+            )
+        thresh = maximumProjection > th
+        segMask = morphology.remove_small_objects(thresh, min_size=25)
+        d1, d2 = (
+            np.where(np.sum(segMask, axis=0) != 0)[0],
+            np.where(np.sum(segMask, axis=1) != 0)[0],
+        )
+        a, b, c, d = (
+            max(0, d1[0] - 100),
+            min(n, d1[-1] + 100),
+            max(0, d2[0] - 100),
+            min(m, d2[-1] + 100),
+        )
+        return a, b, c, d
+
 
 def fusionResultFour(
     boundaryTop,
@@ -919,45 +1195,70 @@ def fusionResultFour(
     s,
     m,
     n,
+    info_path,
     device,
     sample_params,
     Gaussianr=49,
     GFr=49,
 ):
+    zmax = boundaryBack.shape[0]
     decModel = NSCTdec(levels=[3, 3, 3], device=device)
     recModel = NSCTrec(levels=[3, 3, 3], device=device)
     max_filter = nn.MaxPool2d((9, 9), stride=(1, 1), padding=(4, 4))
     k = torch.ones(8, 1, 3, 3).to(device)
     mask = np.arange(m)[None, :, None]
+    if boundaryFront.shape[0] < zmax:
+        boundaryFront = np.concatenate(
+            (
+                boundaryFront,
+                np.zeros((zmax - boundaryFront.shape[0], boundaryFront.shape[1])),
+            ),
+            0,
+        )
     mask_front = mask > boundaryFront[:, None, :]  ###1是下面，0是上面
-    mask_back = mask > boundaryBack[:, None, :]  ###1是下面，0是上面
+    mask_back = ~boundaryBack
     mask_ztop = (
         np.arange(s)[:, None, None] > boundaryTop[None, :, :]
     )  ###1是后面，0是前面
     mask_zbottom = (
         np.arange(s)[:, None, None] > boundaryBottom[None, :, :]
     )  ###1是后面，0是前面
-    vol1 = illu_front
-    vol2 = illu_front
-    vol3 = illu_back
-    vol4 = illu_back
     GFbase, GFdetail = GuidedFilter(r=GFr, eps=1), GuidedFilter(r=9, eps=1e-6)
     kernel = torch.ones(1, 1, Gaussianr, Gaussianr).to(device) / Gaussianr / Gaussianr
     listPair1 = {"1": "4", "2": "3", "4": "1", "3": "2"}
-    reconVol = np.empty(vol1.shape, dtype=np.uint16)
-    for ii in tqdm.tqdm(range(s), desc="fusion: "):
-        s1, s2, s3, s4 = (
-            np.asarray(vol1[ii]),
-            np.asarray(vol2[ii]),
-            np.asarray(vol3[ii]),
-            np.asarray(vol4[ii]),
+    reconVol = np.empty(illu_back.shape, dtype=np.uint16)
+    allList = [
+        value
+        for key, value in sample_params.items()
+        if ("saving_name" in key) and ("dorsal" in key)
+    ]
+    volmin = 65535
+    for l in allList:
+        volmin = min(
+            np.load(os.path.join(info_path, l, "info.npy"), allow_pickle=True).item()[
+                "minvol"
+            ],
+            volmin,
         )
+    for ii in tqdm.tqdm(range(s), desc="fusion: "):
+        if ii < illu_front.shape[0]:
+            s1, s2, s3, s4 = (
+                copy.deepcopy(illu_front[ii]),
+                copy.deepcopy(illu_front[ii]),
+                copy.deepcopy(illu_back[ii]),
+                copy.deepcopy(illu_back[ii]),
+            )
+        else:
+            s3, s4 = copy.deepcopy(illu_back[ii]), copy.deepcopy(illu_back[ii])
+            s1, s2 = np.zeros(s3.shape), np.zeros(s3.shape)
+        s3[s3 < volmin] = s1[s3 < volmin]
+        s4[s4 < volmin] = s1[s4 < volmin]
         tmp1 = (mask_front[ii] == 0) * (mask_ztop[ii] == 0)  ###top+front
         tmp2 = (mask_front[ii] == 1) * (mask_zbottom[ii] == 0)  ###bottom+front
         tmp3 = (mask_back[ii] == 0) * (mask_ztop[ii] == 1)  ###top+back
         tmp4 = (mask_back[ii] == 1) * (mask_zbottom[ii] == 1)  ###bottom+back
         vnameList = ["1", "2", "3", "4"]
-        sg, maskList, vnameListt = {}, {}, []
+        sg, maskList = {}, {}
         sg["1"], sg["2"] = torch.from_numpy(s1.astype(np.float32)[None, None, :, :]).to(
             device
         ), torch.from_numpy(s2.astype(np.float32)[None, None, :, :]).to(device)
@@ -1039,5 +1340,338 @@ def fusionResultFour(
             .astype(np.uint16)
         )
         reconVol[ii, :, :] = result
+        del s1, s2, s3, s4, tmp1, tmp2, tmp3, tmp4, sg, maskList
     del mask_front, mask_ztop, mask_back, mask_zbottom
+    del illu_front, illu_back
     return reconVol
+
+
+def volumeTranslate(
+    inputs,
+    regInfo,
+    AffineMapZXY,
+    s,
+    zmax,
+    m,
+    n,
+    padding_z,
+    save_path,
+    T_flag,
+    device,
+):
+    inputs_dtype = inputs.dtype
+    if zmax > s:
+        rawData = np.concatenate(
+            (inputs, np.zeros((zmax - s, m, n), dtype=inputs.dtype)), 0
+        )
+    else:
+        rawData = inputs
+    del inputs
+    rawData[:] = np.flip(rawData, axis=(0, 1))
+    zs, ze, zss, zee = translatingParams(-int(round(AffineMapZXY[0])))
+    xs, xe, xss, xee = translatingParams(-int(round(AffineMapZXY[1])))
+    ys, ye, yss, yee = translatingParams(int(round(AffineMapZXY[2])))
+    if AffineMapZXY[0] > 0:
+        rawData2 = np.concatenate(
+            (
+                rawData,
+                np.zeros((int(np.ceil(AffineMapZXY[0])), m, n), dtype=rawData.dtype),
+            ),
+            0,
+        )
+    else:
+        rawData2 = rawData
+    translatedData = np.zeros(rawData2.shape, dtype=np.float32)
+    translatedData[zss:zee, xss:xee, yss:yee] = rawData2[zs:ze, xs:xe, ys:ye]
+    del rawData, rawData2
+    AffineTransform = regInfo["AffineTransform_float_3_3_inverse"][:, 0]
+    afixed = regInfo["fixed_inverse"][:, 0]
+    affine = sitk.AffineTransform(3)
+    affine.SetMatrix(AffineTransform[:9].astype(np.float64))
+    affine.SetTranslation(AffineTransform[9:].astype(np.float64))
+    affine.SetCenter(afixed.astype(np.float64))
+    A = np.array(affine.GetMatrix()).reshape(3, 3)
+    c = np.array(affine.GetCenter())
+    t = np.array(affine.GetTranslation())
+    T = np.eye(4, dtype=np.float32)
+    T[0:3, 0:3] = A
+    T[0:3, 3] = -np.dot(A, c) + t + c
+    commonData = np.zeros((max(padding_z, zmax), m, n), dtype=inputs_dtype)
+    xx, yy = np.meshgrid(
+        np.arange(commonData.shape[1], dtype=np.float32),
+        np.arange(commonData.shape[2], dtype=np.float32),
+    )
+    xx, yy = xx.T[None], yy.T[None]
+    ss = torch.split(torch.arange(commonData.shape[0]), 10)
+    for s in tqdm.tqdm(ss, desc="projecting: "):
+        start, end = s[0], s[-1] + 1
+        Z = (
+            np.ones(xx.shape, dtype=np.float32)
+            * np.arange(start, end, dtype=np.float32)[:, None, None]
+        )
+        X = xx.repeat(end - start, axis=0)
+        Y = yy.repeat(end - start, axis=0)
+        offset = np.ones(Z.shape, dtype=np.float32)
+        coor = np.stack((Z, X, Y, offset))
+        del Z, X, Y, offset
+        coor_translated = np.dot(T, coor.reshape(4, -1))[:-1].reshape(
+            3, coor.shape[1], coor.shape[2], coor.shape[3]
+        )
+        del coor
+        if coor_translated[0, ...].max() < 0:
+            continue
+        if coor_translated[0, ...].min() >= translatedData.shape[0]:
+            continue
+        minn = int(np.clip(np.floor(coor_translated[0, ...].min()), 0, None))
+        maxx = int(
+            np.clip(
+                np.ceil(coor_translated[0, ...].max()), None, translatedData.shape[0]
+            )
+        )
+        smallData = translatedData[minn : maxx + 1, ...]
+        coor_translated[0, ...] = coor_translated[0, ...] - minn
+        coor_translated = (
+            coor_translated
+            / np.asarray(smallData.shape, dtype=np.float32)[:, None, None, None]
+            - 0.5
+        ) * 2
+        translatedDatasmall = coordinate_mapping(
+            smallData, coor_translated[[2, 1, 0], ...], device=device
+        )
+        commonData[start:end, ...] = translatedDatasmall
+        del smallData, coor_translated, translatedDatasmall
+        gc.collect()
+    print("save...")
+    if T_flag:
+        result = commonData.swapaxes(1, 2)
+    else:
+        result = commonData
+    if inputs_dtype == np.uint16:
+        tifffile.imwrite(save_path, result)
+    else:
+        np.save(save_path, result)
+    del translatedData, commonData, result
+
+
+def coordinate_mapping(smallData, coor_translated, device):
+    coor_translatedCupy = (
+        torch.from_numpy(coor_translated).permute(1, 2, 3, 0)[None].to(device)
+    )
+    smallDataCupy = torch.from_numpy(smallData)[None, None, :, :].to(device)
+    translatedDataCupy = F.grid_sample(
+        smallDataCupy,
+        coor_translatedCupy,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=True,
+    )
+    translatedDatasmall = translatedDataCupy.squeeze().cpu().data.numpy()
+    del translatedDataCupy, smallDataCupy, coor_translatedCupy
+    return translatedDatasmall
+
+
+def fineReg(
+    respective_view_uint16,
+    moving_view_uint16,
+    xcs,
+    xce,
+    ycs,
+    yce,
+    AffineMapZXY,
+    InfoMax,
+    save_path,
+    destripe_preceded,
+):
+    _, m, n = respective_view_uint16.shape
+    zfront = respective_view_uint16.shape[0]
+    zback = moving_view_uint16.shape[0]
+    if zfront == zback:
+        moving_view_uint16_padded = moving_view_uint16
+        respective_view_uint16_padded = respective_view_uint16
+    elif zfront > zback:
+        moving_view_uint16_padded = np.concatenate(
+            (moving_view_uint16, np.zeros((zfront - zback, m, n), dtype=np.uint16)),
+            0,
+        )
+        respective_view_uint16_padded = respective_view_uint16
+    else:
+        respective_view_uint16_padded = np.concatenate(
+            (
+                respective_view_uint16,
+                np.zeros((zback - zfront, m, n), dtype=np.uint16),
+            ),
+            0,
+        )
+        moving_view_uint16_padded = moving_view_uint16
+    del respective_view_uint16, moving_view_uint16
+    moving_view_uint16_padded[:] = np.flip(moving_view_uint16_padded, axis=(0, 1))
+    zs, ze, zss, zee = translatingParams(-int(round(AffineMapZXY[0])))
+    xs, xe, xss, xee = translatingParams(-int(round(AffineMapZXY[1])))
+    ys, ye, yss, yee = translatingParams(int(round(AffineMapZXY[2])))
+    moving_view_uint16_translated = np.empty(
+        moving_view_uint16_padded.shape, dtype=np.uint16
+    )
+    moving_view_uint16_translated[zss:zee, xss:xee, yss:yee] = (
+        moving_view_uint16_padded[zs:ze, xs:xe, ys:ye]
+    )
+    del moving_view_uint16_padded
+    respective_view_cropped = respective_view_uint16_padded[:, xcs:xce, ycs:yce]
+    moving_view_cropped = moving_view_uint16_translated[:, xcs:xce, ycs:yce]
+    del respective_view_uint16_padded, moving_view_uint16_translated
+    respective_view_uint8, moving_view_uint8 = np.empty(
+        respective_view_cropped.shape, dtype=np.uint8
+    ), np.empty(moving_view_cropped.shape, dtype=np.uint8)
+    respective_view_uint8[:] = respective_view_cropped / InfoMax * 255
+    moving_view_uint8[:] = moving_view_cropped / InfoMax * 255
+    del moving_view_cropped, respective_view_cropped
+    print("to ANTS...")
+    A = np.clip(respective_view_uint8.shape[0] - 200, 0, None) // 2
+    staticANTS = ants.from_numpy(respective_view_uint8[A : -A if A > 0 else None, :, :])
+    movingANTS = ants.from_numpy(moving_view_uint8[A : -A if A > 0 else None, :, :])
+    del moving_view_uint8, respective_view_uint8
+    print("registration...")
+    regModel = ants.registration(
+        staticANTS,
+        movingANTS,
+        mask=None,
+        moving_mask=None,
+        type_of_transform="Rigid",
+        mask_all_stages=True,
+        random_seed=2022,
+    )
+    shutil.copyfile(regModel["fwdtransforms"][0], os.path.join(save_path, "reg.mat"))
+    rfile = scipyio.loadmat(regModel["fwdtransforms"][0])
+    rfile_inverse = scipyio.loadmat(regModel["invtransforms"][0])
+    np.save(
+        os.path.join(
+            save_path,
+            "regInfo{}.npy".format("" if (not destripe_preceded) else "_destripe"),
+        ),
+        {
+            "AffineMapZXY": AffineMapZXY,
+            "AffineTransform_float_3_3": np.squeeze(rfile["AffineTransform_float_3_3"]),
+            "fixed": np.squeeze(rfile["fixed"]),
+            "AffineTransform_float_3_3_inverse": rfile_inverse[
+                "AffineTransform_float_3_3"
+            ],
+            "fixed_inverse": rfile_inverse["fixed"],
+            "region_for_reg": np.array([xcs, xce, ycs, yce]),
+            "zfront": zfront,
+            "zback": zback,
+            "m": m,
+            "n": n,
+            "z": max(zfront, zback),
+        },
+    )
+    del regModel, movingANTS, staticANTS
+
+
+def coarseRegistrationY(front, back, AffineMapZX):
+    AffineMapZXY = np.zeros(3)
+    AffineMapZXY[:2] = AffineMapZX
+    front = front.astype(np.float32)
+    back = back.astype(np.float32)
+    xs, xe, xss, xee = translatingParams(int(round(AffineMapZX[1])))
+    translatedBack = np.zeros(back.shape)
+    translatedBack[xss:xee, :] = back[xs:xe, :]
+    translatedBack[:] = np.flip(translatedBack, 0)
+    regModel = ants.registration(
+        ants.from_numpy(front),
+        ants.from_numpy(translatedBack),
+        type_of_transform="Translation",
+        random_seed=2022,
+    )
+    AffineMapZXY[2] += scipyio.loadmat(regModel["fwdtransforms"][0])[
+        "AffineTransform_float_2_2"
+    ][-1, 0]
+    AffineMapZXY[1] -= scipyio.loadmat(regModel["fwdtransforms"][0])[
+        "AffineTransform_float_2_2"
+    ][-2, 0]
+    return AffineMapZXY, front, regModel["warpedmovout"].numpy()
+
+
+def coarseRegistrationZX(yMPfrontO, yMPbackO, frontAngle, backAngle, r):
+    angle = backAngle - frontAngle
+    yMPfrontO = yMPfrontO.astype(np.float32)
+    yMPbackO = yMPbackO.astype(np.float32)
+    zfront, zback = yMPfrontO.shape[0], yMPbackO.shape[0]
+    if zfront == zback:
+        pass
+    elif zfront > zback:
+        yMPbackO = np.concatenate(
+            (yMPbackO, np.zeros((zfront - zback, yMPbackO.shape[1]))), 0
+        )
+    else:
+        yMPfrontO = np.concatenate(
+            (yMPfrontO, np.zeros((zback - zfront, yMPfrontO.shape[1]))), 0
+        )
+    yMPfront = ndimage.zoom(yMPfrontO, [r, 1], order=1)
+    yMPback = ndimage.rotate(
+        ndimage.zoom(yMPbackO, [r, 1], order=1), order=1, angle=angle
+    )
+    _size = np.maximum(yMPfront.shape, yMPback.shape)
+    for index in ["front", "back"]:
+        locals()["yMPL" + index] = np.zeros(_size)
+        a, b = locals()["yMP" + index].shape
+        locals()["yMPL" + index][
+            (_size[0] - a) // 2 : (_size[0] - a) // 2 + a,
+            (_size[1] - b) // 2 : (_size[1] - b) // 2 + b,
+        ] = locals()["yMP" + index]
+    regModel = ants.registration(
+        ants.from_numpy(locals()["yMPLfront"]),
+        ants.from_numpy(locals()["yMPLback"]),
+        type_of_transform="Translation",
+        random_seed=2022,
+    )
+    transformedback = regModel["warpedmovout"].numpy()
+    tmp = ndimage.rotate(transformedback, angle=-angle, order=1)
+    a, b = tmp.shape
+    s, m = yMPbackO.shape
+    sp = round(s * r)
+    transformedbackO = ndimage.zoom(
+        tmp[(a - sp) // 2 : (a - sp) // 2 + sp, (b - m) // 2 : (b - m) // 2 + m],
+        [1 / r, 1],
+        order=1,
+    )
+    regModel = ants.registration(
+        ants.from_numpy(transformedbackO),
+        ants.from_numpy(yMPbackO),
+        type_of_transform="Translation",
+        random_seed=2022,
+    )
+    return scipyio.loadmat(regModel["fwdtransforms"][0])["AffineTransform_float_2_2"][
+        -2:
+    ][:, 0]
+
+
+def translatingParams(x):
+    if x == 0:
+        xs, xe, xss, xee = None, None, None, None
+    elif x > 0:
+        xs, xe, xss, xee = x, None, None, -x
+    else:
+        xs, xe, xss, xee = None, x, -x, None
+    return xs, xe, xss, xee
+
+
+def boundaryInclude(ft, t, m, n):
+    AffineTransform, afixed = (
+        ft["AffineTransform_float_3_3_inverse"][:, 0],
+        ft["fixed_inverse"][:, 0],
+    )
+    affine = sitk.AffineTransform(3)
+    affine.SetMatrix(AffineTransform[:9].astype(np.float64))
+    affine.SetTranslation(AffineTransform[9:].astype(np.float64))
+    affine.SetCenter(afixed.astype(np.float64))
+    z = copy.deepcopy(t)
+    while 1:
+        transformed_point = [
+            affine.TransformPoint([float(z), float(j), float(k)])[0]
+            for j in [0, m]
+            for k in [0, n]
+        ]
+        zz = min(transformed_point)
+        if zz > t + 1:
+            break
+        z += 1
+    return z
