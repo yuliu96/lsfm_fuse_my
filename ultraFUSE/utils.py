@@ -132,19 +132,20 @@ def extendBoundary(
         p = np.where(tmp != 0)[0]
         if len(p) != 0:
             p0, p1 = p[0], p[-1]
-            if (p1 - p0) > window_size:
-                tmp[p0:p1] = signal.savgol_filter(
-                    signal.savgol_filter(tmp[p0:p1], window_size, 1), window_size, 1
-                )
             if _illu:
-                if (p1 - p0) > 1:
+                if (p1 - p0) > 3:
                     tmp[:p0], tmp[p1:] = np.nan, np.nan
+                    h = (p1 - p0) // 2
+                    h = window_size // 2 if (window_size // 2 < h) else h
                     m = list(set(range(boundary.shape[1])) - set(range(p0, p1)))
-                    boundary[i, m] = (
-                        pd.Series(tmp)
-                        .interpolate(method="spline", order=1, limit_direction="both")
-                        .values[m]
-                    )
+                    edge = np.zeros_like(tmp)
+                    edge[: p0 + h] = tmp[
+                        p0
+                    ]  # pd.Series(tmp[:p0+h]).interpolate(method="spline", order=3, limit_direction="both").values#[m]
+                    edge[p1 - h :] = tmp[
+                        p1 - 1
+                    ]  # pd.Series(tmp[p1-h:]).interpolate(method="spline", order=3, limit_direction="both").values#[m]
+                    boundary[i, m] = edge[m]
                 else:
                     m = list(set(range(boundary.shape[1])) - set(range(p0, p1)))
                     boundary[i, :] = tmp[p0]
@@ -190,6 +191,8 @@ def extendBoundary(
 
 def EM2DPlus(
     segMask,
+    segMask_more,
+    empty_list,
     f0,
     f1,
     stripeMask,
@@ -253,8 +256,10 @@ def EM2DPlus(
         del tmp, classRatio, mask12, mask1, mask2
         return tmpToTops, tmpToBottoms
 
-    def maskfor2d(segMask, stripeMask, window_size, m1, s1, n1):
-        validMask = (segMask.sum(0) != 0).cpu().detach().numpy().astype(np.float32)
+    def maskfor2d(
+        segMask, segMask_more, empty_list, stripeMask, window_size, m1, s1, n1
+    ):
+        validMask = (segMask.sum(0) != 0).astype(np.float32)
         tmp = np.repeat(np.arange(s1)[:, None], n1, 1)
         maskrow = (tmp >= first_nonzero(validMask, None, axis=0, invalid_val=-1)) * (
             tmp <= last_nonzero(validMask, None, axis=0, invalid_val=-1)
@@ -264,7 +269,47 @@ def EM2DPlus(
             tmp >= first_nonzero(validMask, None, axis=1, invalid_val=-1)[:, None]
         ) * (tmp <= last_nonzero(validMask, None, axis=1, invalid_val=-1)[:, None])
         validMask[:] = (maskrow * maskcol).astype(np.float32)
+
+        validMask_more = copy.deepcopy(validMask)
+        validMask_more[empty_list, :] = 1
+
+        valid_edge1 = skimage.util.view_as_windows(
+            np.pad(
+                validMask_more,
+                ((0, 0), (window_size[1] // 2, window_size[1] // 2)),
+                "constant",
+                constant_values=0,
+            ),
+            (1, window_size[1]),
+        ).sum((-2, -1))
+        valid_edge1 = (
+            (valid_edge1 < window_size[1])
+            * (valid_edge1 > 0)
+            * validMask_more.astype(bool)
+        )
+
+        valid_edge2 = skimage.util.view_as_windows(
+            np.pad(
+                validMask,
+                (
+                    (window_size[0] // 2, window_size[0] // 2),
+                    (window_size[1] // 2, window_size[1] // 2),
+                ),
+                "constant",
+                constant_values=0,
+            ),
+            window_size,
+        ).sum((-2, -1))
+        valid_edge2 = (
+            (valid_edge2 < window_size[0] * window_size[1])
+            * (valid_edge2 > 0)
+            * validMask.astype(bool)
+        )
+
         validMask += scipy.ndimage.binary_dilation(
+            stripeMask, structure=np.ones((1, 5)), iterations=5
+        ).astype(np.float32)
+        validMask_more += scipy.ndimage.binary_dilation(
             stripeMask, structure=np.ones((1, 5)), iterations=5
         ).astype(np.float32)
         validFor2D = skimage.util.view_as_windows(
@@ -280,31 +325,33 @@ def EM2DPlus(
             window_size,
         ).sum((-2, -1))
         validFor2D = validFor2D == window_size[0] * window_size[1]
+        validFor2D += valid_edge2
+
         validFor1D = skimage.util.view_as_windows(
             np.pad(
-                validMask,
+                validMask_more,
                 ((0, 0), (window_size[1] // 2, window_size[1] // 2)),
                 "constant",
                 constant_values=0,
             ),
             (1, window_size[1]),
         ).sum((-2, -1))
-        # if allow_break: validFor1D = validFor1D == window_size[1]
-        # else: validFor1D = (validFor1D <= window_size[1]) * (validFor1D > 0)
         validFor1D = validFor1D == window_size[1]
+        validFor1D += valid_edge1
+
         missingMask = (
-            (segMask.sum(0).cpu().detach().numpy() == 0)
+            (segMask.sum(0) == 0)
             * (
                 np.arange(n1)[None, :]
-                >= first_nonzero(
-                    torch.sum(segMask != 0, 0), None, axis=1, invalid_val=-1
-                )[:, None]
+                >= first_nonzero(np.sum(segMask != 0, 0), None, axis=1, invalid_val=-1)[
+                    :, None
+                ]
             )
             * (
                 np.arange(n1)[None, :]
-                <= last_nonzero(
-                    torch.sum(segMask != 0, 0), None, axis=1, invalid_val=-1
-                )[:, None]
+                <= last_nonzero(np.sum(segMask != 0, 0), None, axis=1, invalid_val=-1)[
+                    :, None
+                ]
             )
         )
         return (
@@ -322,19 +369,24 @@ def EM2DPlus(
             .values.reshape(s1, n1)
         )
 
-    def sgolay2d(Z, window_size, kernel):
+    def sgolay2d(Z, validFor2D, window_size, kernel, device):
         w0, w1 = window_size
         if _xy:
-            return (
-                torch.conv2d(
-                    F.pad(Z, (w1 // 2, w1 // 2, w0 // 2, w0 // 2))[None, None, :, :],
-                    kernel,
-                )
-                .squeeze()
-                .cpu()
-                .detach()
-                .numpy()
+            content = torch.conv2d(
+                F.pad(Z[None, None], (w1 // 2, w1 // 2, w0 // 2, w0 // 2), "reflect"),
+                kernel,
             )
+            weight = torch.conv2d(
+                F.pad(
+                    torch.from_numpy(validFor2D.astype(np.float32)).to(device)[
+                        None, None
+                    ],
+                    (w1 // 2, w1 // 2, w0 // 2, w0 // 2),
+                    "reflect",
+                ),
+                kernel,
+            )
+            return (content / weight).squeeze().cpu().detach().numpy()
         else:
             return (
                 torch.conv2d(
@@ -359,17 +411,19 @@ def EM2DPlus(
             )
             for c in ind:
                 if len(c) <= poly_order:
-                    pass
+                    boundaryTMP[i, c] = np.mean(boundaryTMP[i, c])
                 else:
+                    tmp = np.pad(boundaryTMP[i, c], window_size // 2, mode="reflect")
                     tmp = signal.savgol_filter(
-                        boundaryTMP[i, c],
-                        window_size if len(c) > window_size else len(c),
+                        tmp,
+                        window_size,
                         poly_order,
                     )
-                    boundaryTMP[i, c] = tmp
+                    boundaryTMP[i, c] = tmp[window_size // 2 : -(window_size // 2)]
+        return boundaryTMP
 
     print("start optimizing...")
-    m, s, n = segMask.size()
+    m, s, n = segMask.shape
     tmpToTops, tmpToBottoms, classMap = (
         torch.zeros(m, s, n).to(device),
         torch.zeros(m, s, n).to(device),
@@ -383,11 +437,11 @@ def EM2DPlus(
         0,
     )
     validFor2D, validFor1D, missingMask, coorMask = maskfor2d(
-        segMask, stripeMask, window_size, m, s, n
+        segMask, segMask_more, empty_list, stripeMask, window_size, m, s, n
     )
     for e in range(maxEpoch):
         tmpToTops[:], tmpToBottoms[:] = preComputePrior(
-            segMask,
+            segMask_more,
             classMap,
             f0,
             f1,
@@ -424,12 +478,16 @@ def EM2DPlus(
         if _xy == False:
             boundaryRaw = copy.deepcopy(boundaryTMP)
         boundaryTMP[validFor2D] = sgolay2d(
-            torch.from_numpy(boundaryTMP).to(device), window_size, kernel2d
+            torch.from_numpy(boundaryTMP * validFor2D).to(torch.float).to(device),
+            validFor2D,
+            window_size,
+            kernel2d,
+            device,
         )[validFor2D]
         if _xy:
-            # boundaryTMP[validFor1D] = signal.savgol_filter(boundaryTMP, window_size[1], poly_order[1])[validFor1D]
-            # print(validFor1D.shape, window_size, poly_order, m, s, n)
-            sgolay1d(boundaryTMP, validFor1D, window_size[1], poly_order[1], m, s, n)
+            boundaryTMP[:] = sgolay1d(
+                boundaryTMP, validFor1D, window_size[1], poly_order[1], m, s, n
+            )
         boundaryLS[:] = torch.from_numpy(boundaryTMP).to(device)
         cn = cn + 1 if changes <= 2 else 0
         if cn >= 10:
@@ -437,7 +495,7 @@ def EM2DPlus(
         print(
             "\rNo.{:0>3d} iteration EM: maximum changes = {}".format(e, changes), end=""
         )
-    del segMask, f0, f1, tmpToTops, tmpToBottoms, classMap, boundaryOld
+    del segMask, segMask_more, f0, f1, tmpToTops, tmpToBottoms, classMap, boundaryOld
     gc.collect()
     return boundaryTMP, boundaryRaw if _xy == False else None
 
@@ -459,15 +517,7 @@ def waterShed(segMask, vol0, th, maxv, minv, s, m, n, view, _log, _xy):
             if _log
             else vol0[ind].astype(np.float32)
         )
-        if _xy:
-            tmp = 255 * (xo > th).astype(np.uint8)
-            thresh[:] = (
-                tmp
-                if sum(sum(tmp)) > 25
-                else 255 * (xo > filters.threshold_otsu(xo)).astype(np.uint8)
-            )
-        else:
-            thresh[:] = 255 * (xo > th).astype(np.uint8)
+        thresh[:] = 255 * (xo > th).astype(np.uint8)
         if xo.max() > 0:
             x[:] = (
                 255

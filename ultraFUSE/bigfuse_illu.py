@@ -66,12 +66,16 @@ class BigFUSE_illu:
             "require_log": require_log,
             "device": device,
         }
-        self.train_params["kernel2d"] = torch.from_numpy(
-            sgolay2dkernel(
-                np.array(self.train_params["window_size"]),
-                np.array(self.train_params["poly_order"]),
+        self.train_params["kernel2d"] = (
+            torch.from_numpy(
+                sgolay2dkernel(
+                    np.array(self.train_params["window_size"]),
+                    np.array(self.train_params["poly_order"]),
+                )
             )
-        ).to(self.train_params["device"])
+            .to(torch.float)
+            .to(self.train_params["device"])
+        )
 
     def train(
         self,
@@ -249,7 +253,7 @@ class BigFUSE_illu:
 
         print("\nSegment sample...")
         if self.train_params["require_segmentation"]:
-            segMask = self.segmentSample(
+            segMask, segMask_more, empty_list = self.segmentSample(
                 topView=os.path.join(
                     save_path, self.sample_params["topillu_saving_name"]
                 ),
@@ -269,6 +273,7 @@ class BigFUSE_illu:
             )
         else:
             segMask = np.ones((s, m, n), dtype=np.uint8)
+            segMask_more = np.ones((s, m, n), dtype=np.uint8)
 
         print("\nExtract features...")
         topF, bottomF, stripeMask = self.extractNSCTF(
@@ -282,7 +287,9 @@ class BigFUSE_illu:
         )
 
         print("\nDual-illumination fusion...")
-        boundary = self.dualViewFusion(topF, bottomF, segMask, stripeMask)
+        boundary = self.dualViewFusion(
+            topF, bottomF, segMask, segMask_more, empty_list, stripeMask
+        )
         boundary = extendBoundary(
             boundary,
             self.train_params["resample_ratio"],
@@ -295,11 +302,23 @@ class BigFUSE_illu:
         if ys is not None:
             boundaryE[:, :ys], boundaryE[:, ye:] = np.nan, np.nan
             for i in range(boundaryE.shape[0]):
-                boundaryE[i, :] = (
-                    pd.Series(boundaryE[i, :])
-                    .interpolate(method="spline", order=1, limit_direction="both")
+                edge = np.zeros_like(boundaryE[i, :])
+                edge[: ys + self.train_params["window_size"][1] // 2] = (
+                    pd.Series(
+                        boundaryE[i, : ys + self.train_params["window_size"][1] // 2]
+                    )
+                    .interpolate(method="spline", order=3, limit_direction="both")
                     .values
                 )
+                edge[ye - self.train_params["window_size"][1] // 2 :] = (
+                    pd.Series(
+                        boundaryE[i, ye - self.train_params["window_size"][1] // 2 :]
+                    )
+                    .interpolate(method="spline", order=3, limit_direction="both")
+                    .values
+                )
+                boundaryE[i, :ys] = edge[:ys]
+                boundaryE[i, ye:] = edge[ye:]
         if xs is not None:
             boundaryE += xs
         boundaryE = np.clip(boundaryE, 0, m_o).astype(np.uint16)
@@ -372,16 +391,21 @@ class BigFUSE_illu:
 
         del reconVol, result
 
-    def dualViewFusion(self, topF, bottomF, segMaskvUINT8, stripeMask):
+    def dualViewFusion(
+        self, topF, bottomF, segMaskvUINT8, segMask_more, empty_list, stripeMask
+    ):
         print("to GPU...")
-        segMaskGPU = torch.from_numpy(segMaskvUINT8.transpose(1, 0, 2)).to(
+        segMask_more_GPU = torch.from_numpy(segMask_more.transpose(1, 0, 2)).to(
             self.train_params["device"]
         )
+        segMask = segMaskvUINT8.transpose(1, 0, 2)
         topFGPU, bottomFGPU = torch.from_numpy(topF**2).to(
             self.train_params["device"]
         ), torch.from_numpy(bottomF**2).to(self.train_params["device"])
         boundary, _ = EM2DPlus(
-            segMaskGPU,
+            segMask,
+            segMask_more_GPU,
+            empty_list,
             bottomFGPU,
             topFGPU,
             stripeMask,
@@ -399,7 +423,7 @@ class BigFUSE_illu:
             _xy=True,
             _fastMode=self.train_params["fast_mode"],
         )
-        del segMaskGPU, topFGPU, bottomFGPU
+        del segMask_more_GPU, segMask, topFGPU, bottomFGPU
         return boundary
 
     def extractNSCTF(self, s, m, n, topVol, bottomVol, segMask, Max):
@@ -506,6 +530,14 @@ class BigFUSE_illu:
             _xy=True,
         )
         segMask = refineShape(topSegMask, bottomSegMask, s, m, n, _xy=True)
+        segMask_more = np.zeros_like(segMask)
+        empty_list = []
+        for i in range(segMask.shape[0]):
+            if segMask[i].sum():
+                segMask_more[i] = segMask[i]
+            else:
+                segMask_more[i] = 1
+                empty_list.append(i)
         """
         for i in range(0, topVol.shape[0], 3):
             plt.subplot(1, 3, 1)
@@ -517,7 +549,7 @@ class BigFUSE_illu:
             plt.show()
         """
         del topSegMask, bottomSegMask, topVol, bottomVol
-        return segMask
+        return segMask, segMask_more, empty_list
 
     def measureSample(self, rawPlanes, f, save_path, MIP_info):
         if "top" in f:
