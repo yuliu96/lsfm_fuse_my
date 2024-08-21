@@ -1983,7 +1983,6 @@ def fusionResultFour(
         np.repeat(np.repeat(_mask_small[:, ::2, ::2], 3, 1), 3, 2)
     )
     boundary_mask[invalid_region] = 1
-    np.save("boundary_mask.npy", boundary_mask)
 
     # boundary_mask = np.load("boundary_mask2.npy")
     s_f = illu_front.shape[0]
@@ -2507,8 +2506,6 @@ def fineReg(
         mask_all_stages=True,
         random_seed=2022,
     )
-    np.save("staticANTS.npy", staticANTS.numpy())
-    np.save("movingANTS.npy", regModel["warpedmovout"].numpy())
     shutil.copyfile(regModel["fwdtransforms"][0], os.path.join(save_path, "reg.mat"))
     rfile = scipyio.loadmat(regModel["fwdtransforms"][0])
     rfile_inverse = scipyio.loadmat(regModel["invtransforms"][0])

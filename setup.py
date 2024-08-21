@@ -48,6 +48,8 @@ requirements = [
     "colour",
     "cucim",
     "open3d",
+    "cupy",
+    "cupyx",
 ]
 
 extra_requirements = {
