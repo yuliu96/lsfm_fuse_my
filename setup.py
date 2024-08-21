@@ -45,6 +45,9 @@ requirements = [
     "antspyx",
     "SimpleITK",
     "opencv-python",
+    "colour",
+    "cucim",
+    "open3d",
 ]
 
 extra_requirements = {
@@ -72,9 +75,8 @@ setup(
     description="A fusion algorithm in LSFM",
     entry_points={
         "console_scripts": [
-            "bigfuse_illu=ultraFUSE.bin.run_bigfuse_illu:main",
-            "bigfuse_det_rotation=ultraFUSE.bin.run_bigfuse_det_rotation:main",
-            "bigfuse_det_twocams=ultraFUSE.bin.run_bigfuse_det_twocams:main",
+            "fuse_illu=FUSE.bin.run_fuse_illu:main",
+            "fuse_det=FUSE.bin.run_fuse_det:main",
         ],
     },
     install_requires=requirements,
@@ -83,14 +85,14 @@ setup(
     long_description_content_type="text/markdown",
     include_package_data=True,
     keywords="lsfm_fusion",
-    name="ultraFUSE",
+    name="FUSE",
     packages=find_packages(exclude=["tests", "*.tests", "*.tests.*"]),
     python_requires=">=3.9",
     setup_requires=setup_requirements,
-    test_suite="lsfm_destripe/tests",
+    test_suite="lsfm_fuse/tests",
     tests_require=test_requirements,
     extras_require=extra_requirements,
-    url="https://github.com/yuliu96/ultraFUSE",
+    url="https://github.com/peng-lab/LSFM-fusion",
     # Do not edit this string manually, always use bumpversion
     # Details in CONTRIBUTING.rst
     version="0.0.1",

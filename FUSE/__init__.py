@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-"""Top-level package for LSFM ultraFUSE."""
+"""Top-level package for LSFM FUSE."""
 
 __author__ = "Yu Liu"
 __email__ = "liuyu9671@gmail.com"
@@ -13,6 +13,5 @@ def get_module_version():
     return __version__
 
 
-from .bigfuse_illu import BigFUSE_illu
-from .bigfuse_det_twocams import BigFUSE_det_twoCams
-from .bigfuse_det_rotation import BigFUSE_det_rotation
+from .fuse_illu import FUSE_illu
+from .fuse_det import FUSE_det

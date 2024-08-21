@@ -12,7 +12,7 @@ import sys
 import traceback
 
 from pathlib import Path
-from ultraFUSE import BigFUSE_illu, get_module_version
+from FUSE import FUSE_illu, get_module_version
 
 ###############################################################################
 
@@ -22,6 +22,17 @@ logging.basicConfig(
 )
 
 ###############################################################################
+
+
+def list_of_floats(arg):
+    return list(map(int, arg.split(",")))
+
+
+def bool_args(arg):
+    if ("false" == arg) or ("False" == arg):
+        return False
+    elif ("true" == arg) or ("True" == arg):
+        return True
 
 
 class Args(argparse.Namespace):
@@ -52,26 +63,15 @@ class Args(argparse.Namespace):
 
         p.add_argument(
             "--require_precropping",
-            action="store",
-            dest="require_precropping",
-            default=True,
-            type=bool,
+            type=bool_args,
+            default="True",
         )
 
         p.add_argument(
             "--precropping_params",
+            type=list_of_floats,
             action="store",
-            dest="precropping_params",
             default=[],
-            type=list,
-        )
-
-        p.add_argument(
-            "--require_flipping",
-            action="store",
-            dest="require_flipping",
-            default=False,
-            type=bool,
         )
 
         p.add_argument(
@@ -83,83 +83,31 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--Lambda",
-            action="store",
-            dest="Lambda",
-            default=0.1,
-            type=float,
-        )
-
-        p.add_argument(
             "--window_size",
+            type=list_of_floats,
             action="store",
-            dest="window_size",
             default=[5, 59],
-            type=list,
         )
 
         p.add_argument(
             "--poly_order",
+            type=list_of_floats,
             action="store",
-            dest="poly_order",
-            default=[3, 3],
-            type=list,
+            default=[2, 2],
         )
 
         p.add_argument(
             "--n_epochs",
             action="store",
             dest="n_epochs",
-            default=150,
-            type=int,
-        )
-
-        p.add_argument(
-            "--Gaussian_kernel_size",
-            action="store",
-            dest="Gaussian_kernel_size",
-            default=49,
-            type=int,
-        )
-
-        p.add_argument(
-            "--GF_kernel_size",
-            action="store",
-            dest="GF_kernel_size",
-            default=29,
+            default=50,
             type=int,
         )
 
         p.add_argument(
             "--require_segmentation",
-            action="store",
-            dest="require_segmentation",
-            default=True,
-            type=bool,
-        )
-
-        p.add_argument(
-            "--allow_break",
-            action="store",
-            dest="allow_break",
-            default=False,
-            type=bool,
-        )
-
-        p.add_argument(
-            "--fast_mode",
-            action="store",
-            dest="fast_mode",
-            default=False,
-            type=bool,
-        )
-
-        p.add_argument(
-            "--require_log",
-            action="store",
-            dest="require_log",
-            default=True,
-            type=bool,
+            type=bool_args,
+            default="True",
         )
 
         p.add_argument(
@@ -207,6 +155,7 @@ class Args(argparse.Namespace):
             default=None,
             type=str,
         )
+
         p.add_argument(
             "--right_illu_data",
             action="store",
@@ -214,24 +163,47 @@ class Args(argparse.Namespace):
             default=None,
             type=str,
         )
+
         p.add_argument(
             "--save_path",
             action="store",
             dest="save_path",
             type=str,
         )
+
         p.add_argument(
             "--save_folder",
             action="store",
             dest="save_folder",
             type=str,
         )
+
         p.add_argument(
             "--camera_position",
             action="store",
             dest="camera_position",
             default="",
             type=str,
+        )
+
+        p.add_argument(
+            "--cam_pos",
+            action="store",
+            dest="cam_pos",
+            default="front",
+            type=str,
+        )
+
+        p.add_argument(
+            "--sparse_sample",
+            type=bool_args,
+            default="False",
+        )
+
+        p.add_argument(
+            "--save_separate_results",
+            type=bool_args,
+            default="False",
         )
 
         p.add_argument(
@@ -251,21 +223,14 @@ def main():
         args = Args()
         dbg = args.debug
 
-        exe = BigFUSE_illu(
+        exe = FUSE_illu(
             args.require_precropping,
             args.precropping_params,
-            args.require_flipping,
             args.resample_ratio,
-            args.Lambda,
             args.window_size,
             args.poly_order,
             args.n_epochs,
-            args.Gaussian_kernel_size,
-            args.GF_kernel_size,
             args.require_segmentation,
-            args.allow_break,
-            args.fast_mode,
-            args.require_log,
             args.device,
         )
         out = exe.train(
@@ -277,6 +242,9 @@ def main():
             args.right_illu_data,
             args.save_path,
             args.save_folder,
+            args.save_separate_results,
+            args.sparse_sample,
+            args.cam_pos,
             args.camera_position,
         )
 

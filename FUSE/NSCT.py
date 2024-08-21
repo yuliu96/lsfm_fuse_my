@@ -13,7 +13,7 @@ class NSCTdec:
         self.levels = levels
         self.max_filter = nn.MaxPool2d((9, 9), stride=(1, 1), padding=(4, 4))
         self.dKernel = torch.ones(1, 1, 3, 3).to(self.device) / 9
-        self.stdpadding = nn.ZeroPad2d((1, 1, 1, 1))
+        self.stdpadding = nn.ReflectionPad2d((1, 1, 1, 1))
         filters = {}
         h1, h2 = self.dfilters()
         filters["0"] = (
