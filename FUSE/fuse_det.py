@@ -54,7 +54,10 @@ import scipy.ndimage as ndimage
 import ants
 import scipy.io as scipyio
 import cupy
-
+from cucim.skimage import feature
+from cupyx.scipy.ndimage import map_coordinates as map_coordinates
+import cucim
+import open3d as o3d
 try:
     from skimage import filters
 except ImportError:
