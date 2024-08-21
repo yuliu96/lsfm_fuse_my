@@ -104,26 +104,26 @@ fuse_illu --data_path /path/to/my \
 ```
 a full list of changeable args:
 ```
-usage: run_dualillufuse --data_path
-                        --sample_name
-                        --save_path
-                        --save_folder
-                        [--require_precropping "True"]
-                        [--precropping_params []]
-                        [--resample_ratio 2]
-                        [--window_size [5, 59]]
-                        [--poly_order [2, 2]]
-                        [--n_epochs 50]
-                        [--require_segmentation "True"]
-                        [--device "cpu"]
-                        [--top_illu_data None]
-                        [--bottom_illu_data None]
-                        [--left_illu_data None]
-                        [--right_illu_data None]
-                        [--camera_position ""]
-                        [--cam_pos "front"]
-                        [--sparse_sample "False"]
-                        [--save_separate_results "False"]
+usage: run_fuse_illu --data_path
+                     --sample_name
+                     --save_path
+                     --save_folder
+                     [--require_precropping "True"]
+                     [--precropping_params []]
+                     [--resample_ratio 2]
+                     [--window_size [5, 59]]
+                     [--poly_order [2, 2]]
+                     [--n_epochs 50]
+                     [--require_segmentation "True"]
+                     [--device "cpu"]
+                     [--top_illu_data None]
+                     [--bottom_illu_data None]
+                     [--left_illu_data None]
+                     [--right_illu_data None]
+                     [--camera_position ""]
+                     [--cam_pos "front"]
+                     [--sparse_sample "False"]
+                     [--save_separate_results "False"]
 ```
 
 
@@ -235,58 +235,36 @@ bigfuse_det --data_path /path/to/my \
 ```
 in addition, all the training parameters can be changed in command line. A full list of changeable args:
 ```
-usage: run_dualillufuse --data_path
-                        --sample_name
-                        --save_path
-                        --save_folder
-                        [--require_precropping "True"]
-                        [--precropping_params []]
-                        [--resample_ratio 2]
-                        [--window_size [5, 59]]
-                        [--poly_order [2, 2]]
-                        [--n_epochs 50]
-                        [--require_segmentation "True"]
-                        [--device "cpu"]
-                        [--top_illu_data None]
-                        [--bottom_illu_data None]
-                        [--left_illu_data None]
-                        [--right_illu_data None]
-                        [--camera_position ""]
-                        [--cam_pos "front"]
-                        [--sparse_sample "False"]
-                        [--save_separate_results "False"]
-
-
-usage: run_dualcamerafuse --data_path
-                          --sample_name
-                          --save_path
-                          --save_folder
-                          --require_registration
-                          --require_flipping_along_illu_for_dorsaldet
-                          --require_flipping_along_det_for_dorsaldet
-                          [--require_precropping "True"]
-                          [--precropping_params []]
-                          [--resample_ratio 2]
-                          [--window_size [5, 59]]
-                          [--poly_order [2, 2]]
-                          [--n_epochs 50]
-                          [--require_segmentation "True"]
-                          [--skip_illuFusion "False"]
-                          [--destripe_preceded  "False"]
-                          [--destripe_params None]
-                          [--device "cpu"]
-                          [--sparse_sample "False"]
-                          [--top_illu_ventral_det_data None]
-                          [--bottom_illu_ventral_det_data None]
-                          [--top_illu_dorsal_det_data None]
-                          [--bottom_illu_dorsal_det_data None]
-                          [--left_illu_ventral_det_data None]
-                          [--right_illu_ventral_det_data None]
-                          [--left_illu_dorsal_det_data None]
-                          [--right_illu_dorsal_det_data None]
-                          [--save_separate_results "False"]
-                          [--z_spacing None]
-                          [--xy_spacing None]
+usage: run_fuse_det --data_path
+                    --sample_name
+                    --save_path
+                    --save_folder
+                    --require_registration
+                    --require_flipping_along_illu_for_dorsaldet
+                    --require_flipping_along_det_for_dorsaldet
+                    [--require_precropping "True"]
+                    [--precropping_params []]
+                    [--resample_ratio 2]
+                    [--window_size [5, 59]]
+                    [--poly_order [2, 2]]
+                    [--n_epochs 50]
+                    [--require_segmentation "True"]
+                    [--skip_illuFusion "False"]
+                    [--destripe_preceded  "False"]
+                    [--destripe_params None]
+                    [--device "cpu"]
+                    [--sparse_sample "False"]
+                    [--top_illu_ventral_det_data None]
+                    [--bottom_illu_ventral_det_data None]
+                    [--top_illu_dorsal_det_data None]
+                    [--bottom_illu_dorsal_det_data None]
+                    [--left_illu_ventral_det_data None]
+                    [--right_illu_ventral_det_data None]
+                    [--left_illu_dorsal_det_data None]
+                    [--right_illu_dorsal_det_data None]
+                    [--save_separate_results "False"]
+                    [--z_spacing None]
+                    [--xy_spacing None]
 ```
 
 ## Installation
