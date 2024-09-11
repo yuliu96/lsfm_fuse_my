@@ -46,10 +46,7 @@ requirements = [
     "SimpleITK",
     "opencv-python",
     "colour",
-    "cucim",
     "open3d",
-    "cupy",
-    "cupyx",
 ]
 
 extra_requirements = {
