@@ -121,9 +121,11 @@ class FUSE_det:
         require_segmentation: bool = True,
         skip_illuFusion: bool = True,
         destripe_params: str = "",
-        device: str = "cuda",
+        device: str = None,
         registration_params = None,
     ):
+        if device == None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.train_params = {
             "require_precropping": require_precropping,
             "precropping_params": precropping_params,
