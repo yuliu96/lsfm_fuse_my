@@ -82,8 +82,10 @@ class FUSE_illu:
         poly_order: list[int, int] = [2, 2],
         n_epochs: int = 50,
         require_segmentation: bool = True,
-        device: str = "cpu",
+        device: str = None,
     ):
+        if device == None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.train_params = {
             "require_precropping": require_precropping,
             "precropping_params": precropping_params,
