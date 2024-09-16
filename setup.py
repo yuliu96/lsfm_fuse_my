@@ -40,6 +40,7 @@ dev_requirements = [
 requirements = [
     "scikit-image",
     "torch",
+    "torchvision",
     "tqdm",
     "aicsimageio",
     "antspyx",
@@ -47,6 +48,7 @@ requirements = [
     "opencv-python",
     "colour",
     "open3d",
+    "h5py",
 ]
 
 extra_requirements = {
