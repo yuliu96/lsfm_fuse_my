@@ -1,3 +1,5 @@
+from datetime import datetime
+import shutil
 def make_Ramp(ramp_colors):
     from colour import Color
     from matplotlib.colors import LinearSegmentedColormap
@@ -102,6 +104,54 @@ class FUSE_illu:
             .to(torch.float)
             .to(self.train_params["device"])
         )
+
+    def train_from_params(self, params: dict):
+        """Parses training parameters from dictionary"""
+        if params["method"] != "illumination":
+            raise ValueError(f"Invalid method: {params['method']}")
+        if params["amount"] != 2:
+            raise ValueError("Only 2 images are supported for illumination")
+        image1 = params["image1"]
+        image2 = params["image2"]
+        direction1 = params["direction1"]
+        direction2 = params["direction2"]
+        top_illu_data = None
+        bottom_illu_data = None
+        left_illu_data = None
+        right_illu_data = None
+        if direction1 == "Top" and direction2 == "Bottom":
+            top_illu_data = image1
+            bottom_illu_data = image2
+        elif direction1 == "Bottom" and direction2 == "Top":
+            top_illu_data = image2
+            bottom_illu_data = image1
+        elif direction1 == "Left" and direction2 == "Right":
+            left_illu_data = image1
+            right_illu_data = image2
+        elif direction1 == "Right" and direction2 == "Left":
+            left_illu_data = image2
+            right_illu_data = image1
+        else:
+            raise ValueError(f"Invalid combination of directions: {direction1}, {direction2}")
+        tmp_path = params["tmp_path"]
+        # Create a directory under the intermediate_path
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_dir_path = os.path.join(tmp_path, current_time)
+        os.makedirs(new_dir_path, exist_ok=True)
+
+        # TODO: stop opening windows
+        output_image = self.train(
+            top_illu_data=top_illu_data,
+            bottom_illu_data=bottom_illu_data,
+            left_illu_data=left_illu_data,
+            right_illu_data=right_illu_data,
+            save_path=new_dir_path,
+            # TODO: more parameters?
+        )
+        if not params["keep_intermediates"]:
+            # Clean up the intermediate directory
+            shutil.rmtree(new_dir_path)
+        return output_image
 
     def train(
         self,

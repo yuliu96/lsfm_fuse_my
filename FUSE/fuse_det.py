@@ -1,3 +1,4 @@
+from datetime import datetime
 def make_Ramp(ramp_colors):
     from colour import Color
     from matplotlib.colors import LinearSegmentedColormap
@@ -160,6 +161,121 @@ class FUSE_det:
             self.registration_params = define_registration_params()
         else:
             self.registration_params = define_registration_params(**registration_params)
+
+    def train_from_params(self, params: dict):
+        """Parses training parameters from dictionary"""
+        if params["method"] != "detection":
+            raise ValueError(f"Invalid method: {params['method']}")
+        if params["amount"] not in [2,4]:
+            raise ValueError("Only 2 or 4 images are supported for detection")
+        image1 = params["image1"]
+        image3 = params["image3"]
+        direction1 = params["direction1"]
+        direction3 = params["direction3"]
+
+        top_ventral_data = None
+        bottom_ventral_data = None
+        top_dorsal_data = None
+        bottom_dorsal_data = None
+        left_ventral_data = None
+        right_ventral_data = None
+        left_dorsal_data = None
+        right_dorsal_data = None
+
+        ventral_data = None
+        dorsal_data = None
+        left_right = None
+        if params["amount"] == 4:
+            image2 = params["image2"]
+            image4 = params["image4"]
+            direction2 = params["direction2"]
+            direction4 = params["direction4"]
+            if direction1 == "Top" and direction2 == "Bottom":
+                top_ventral_data = image1
+                bottom_ventral_data = image2
+            elif direction1 == "Bottom" and direction2 == "Top":
+                top_ventral_data = image2
+                bottom_ventral_data = image1
+            elif direction1 == "Left" and direction2 == "Right":
+                left_ventral_data = image1
+                right_ventral_data = image2
+            elif direction1 == "Right" and direction2 == "Left":
+                left_ventral_data = image2
+                right_ventral_data = image1
+            else:
+                raise ValueError(
+                    f"Invalid directions for ventral detection: {direction1}, {direction2}"
+                )
+
+            if (direction3 not in [direction1, direction2]
+                or direction4 not in [direction1, direction2]
+                or direction3 == direction4):
+                raise ValueError(
+                    f"Invalid directions for dorsal detection: {direction3}, {direction4}"
+                )
+
+            if direction3 == "Top" and direction4 == "Bottom":
+                top_dorsal_data = image3
+                bottom_dorsal_data = image4
+            elif direction3 == "Bottom" and direction4 == "Top":
+                top_dorsal_data = image4
+                bottom_dorsal_data = image3
+            elif direction3 == "Left" and direction4 == "Right":
+                left_dorsal_data = image3
+                right_dorsal_data = image4
+            elif direction3 == "Right" and direction4 == "Left":
+                left_dorsal_data = image4
+                right_dorsal_data = image3
+
+        else:
+            ventral_data = image1
+            dorsal_data = image3
+            if (direction1 in ["Top", "Bottom"]
+                and direction3 in ["Top", "Bottom"]
+                and direction1 != direction3):
+                left_right = False
+            elif (direction1 in ["Left", "Right"]
+                  and direction3 in ["Left", "Right"]
+                  and direction1 != direction3):
+                left_right = True
+            else:
+                raise ValueError(f"Invalid directions for detection: {direction1}, {direction3}")
+
+        require_registration = params["require_registration"]
+        xy_spacing, z_spacing = None, None
+        if require_registration:
+            z_spacing = params["axial_resolution"]
+            xy_spacing = params["lateral_resolution"]
+        tmp_path = params["tmp_path"]
+        # Create a directory under the intermediate_path
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        new_dir_path = os.path.join(tmp_path, current_time)
+        os.makedirs(new_dir_path, exist_ok=True)
+
+        output_image = self.train(
+            require_registration=require_registration,
+            require_flipping_along_illu_for_dorsaldet=params["require_flip_illu"],
+            require_flipping_along_det_for_dorsaldet=params["require_flip_det"],
+            top_illu_ventral_det_data=top_ventral_data,
+            bottom_illu_ventral_det_data=bottom_ventral_data,
+            top_illu_dorsal_det_data=top_dorsal_data,
+            bottom_illu_dorsal_det_data=bottom_dorsal_data,
+            left_illu_ventral_det_data=left_ventral_data,
+            right_illu_ventral_det_data=right_ventral_data,
+            left_illu_dorsal_det_data=left_dorsal_data,
+            right_illu_dorsal_det_data=right_dorsal_data,
+            ventral_det_data=ventral_data,
+            dorsal_det_data=dorsal_data,
+            save_path=new_dir_path,
+            z_spacing=z_spacing,
+            xy_spacing=xy_spacing,
+            left_right=left_right,
+            # TODO: more parameters?
+        )
+        if not params["keep_intermediates"]:
+            # Clean up the intermediate directory
+            shutil.rmtree(new_dir_path)
+        return output_image
 
     def train(
         self,
