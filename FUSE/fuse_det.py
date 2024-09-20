@@ -100,6 +100,7 @@ def DoG(input, device):
             max_sigma=1.8 * 1.6 + 1,
             threshold=0.001,
             th = filters.threshold_otsu(input[ind]),
+            device = device,
         )[:, :-1]
         if tmp.shape[0] != 0:
             tmp = tmp.cpu().data.numpy()
