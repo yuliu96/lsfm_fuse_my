@@ -1,4 +1,4 @@
-# LSFM Fusion in Python
+# Leonardo-FUSE (LSFM Fusion in Python)
 
 [![Build Status](https://github.com/peng-lab/LSFM-fusion/workflows/Build%20Main/badge.svg)](https://github.com/peng-lab/LSFM-fusion/actions)
 [![Documentation](https://github.com/peng-lab/LSFM-fusion/workflows/Documentation/badge.svg)](https://peng-lab.github.io/LSFM-fusion/)
