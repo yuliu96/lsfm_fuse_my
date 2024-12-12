@@ -59,8 +59,8 @@ import matplotlib.patches as patches
 import tqdm
 import gc
 import tifffile
-from FUSE.NSCT import NSCTdec
-from FUSE.utils import (
+from lsfm_fuse.NSCT import NSCTdec
+from lsfm_fuse.utils import (
     sgolay2dkernel,
     waterShed,
     refineShape,

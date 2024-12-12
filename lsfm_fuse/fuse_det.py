@@ -34,9 +34,9 @@ blue = blue.astype(np.uint8).T
 purple = purple.astype(np.uint8).T
 green = green.astype(np.uint8).T
 
-from FUSE.fuse_illu import FUSE_illu
-from FUSE.blobs_dog import blob_dog
-from FUSE.utils import (
+from lsfm_fuse.fuse_illu import FUSE_illu
+from lsfm_fuse.blobs_dog import blob_dog
+from lsfm_fuse.utils import (
     sgolay2dkernel,
     waterShed,
     refineShape,
@@ -46,9 +46,9 @@ from FUSE.utils import (
     imagej_metadata_tags,
 )
 from skimage import measure
-from FUSE.NSCT import NSCTdec
+from lsfm_fuse.NSCT import NSCTdec
 
-# from FUSE.blobs_dog import blob_dog
+# from lsfm_fuse.blobs_dog import blob_dog
 from typing import Union
 import dask
 import torch

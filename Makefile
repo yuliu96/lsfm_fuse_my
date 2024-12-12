@@ -49,9 +49,9 @@ build: ## run tox / run tests and lint
 	tox
 
 gen-docs: ## generate Sphinx HTML documentation, including API docs
-	rm -f docs/FUSE*.rst
+	rm -f docs/lsfm_fuse*.rst
 	rm -f docs/modules.rst
-	sphinx-apidoc -o docs/ FUSE **/tests/
+	sphinx-apidoc -o docs/ lsfm_fuse **/tests/
 	$(MAKE) -C docs html
 
 docs: ## generate Sphinx HTML documentation, including API docs, and serve to browser

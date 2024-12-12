@@ -76,8 +76,8 @@ setup(
     description="A fusion algorithm in LSFM",
     entry_points={
         "console_scripts": [
-            "fuse_illu=FUSE.bin.run_fuse_illu:main",
-            "fuse_det=FUSE.bin.run_fuse_det:main",
+            "fuse_illu=lsfm_fuse.bin.run_fuse_illu:main",
+            "fuse_det=lsfm_fuse.bin.run_fuse_det:main",
         ],
     },
     install_requires=requirements,
@@ -85,15 +85,15 @@ setup(
     long_description=readme,
     long_description_content_type="text/markdown",
     include_package_data=True,
-    keywords="FUSE",
-    name="FUSE",
+    keywords="lsfm_fuse",
+    name="lsfm_fuse",
     packages=find_packages(exclude=["tests", "*.tests", "*.tests.*"]),
     python_requires=">=3.9",
     setup_requires=setup_requirements,
-    test_suite="FUSE/tests",
+    test_suite="lsfm_fuse/tests",
     tests_require=test_requirements,
     extras_require=extra_requirements,
-    url="https://github.com/peng-lab/Leonardo-FUSE",
+    url="https://github.com/peng-lab/lsfm_fuse",
     # Do not edit this string manually, always use bumpversion
     # Details in CONTRIBUTING.rst
     version="0.1.0",

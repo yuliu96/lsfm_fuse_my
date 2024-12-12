@@ -11,7 +11,7 @@ import logging
 import sys
 import traceback
 
-from FUSE import FUSE_illu, get_module_version
+from lsfm_fuse import FUSE_det, get_module_version
 
 ###############################################################################
 
@@ -19,6 +19,7 @@ log = logging.getLogger()
 logging.basicConfig(
     level=logging.INFO, format="[%(levelname)4s:%(lineno)4s %(asctime)s] %(message)s"
 )
+
 
 ###############################################################################
 
@@ -49,8 +50,8 @@ class Args(argparse.Namespace):
 
     def __parse(self):
         p = argparse.ArgumentParser(
-            prog="run_dualillufuse",
-            description="run dualillufuse for LSFM images",
+            prog="run_dualcamerafuse",
+            description="run dualcamerafuse for LSFM images",
         )
 
         p.add_argument(
@@ -110,11 +111,49 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
+            "--skip_illuFusion",
+            type=bool_args,
+            default="True",
+        )
+
+        p.add_argument(
+            "--destripe_preceded",
+            type=bool_args,
+            default="False",
+        )
+
+        p.add_argument(
+            "--destripe_params",
+            action="store",
+            dest="destripe_params",
+            default=None,
+            type=dict,
+        )
+
+        p.add_argument(
             "--device",
             action="store",
             dest="device",
             default="cuda",
             type=str,
+        )
+
+        p.add_argument(
+            "--require_registration",
+            type=bool_args,
+            required=True,
+        )
+
+        p.add_argument(
+            "--require_flipping_along_illu_for_dorsaldet",
+            type=bool_args,
+            required=True,
+        )
+
+        p.add_argument(
+            "--require_flipping_along_det_for_dorsaldet",
+            type=bool_args,
+            required=True,
         )
 
         p.add_argument(
@@ -132,33 +171,69 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--top_illu_data",
+            "--sparse_sample",
+            type=bool_args,
+            default="False",
+        )
+
+        p.add_argument(
+            "--top_illu_ventral_det_data",
             action="store",
-            dest="top_illu_data",
+            dest="top_illu_ventral_det_data",
             default=None,
             type=str,
         )
 
         p.add_argument(
-            "--bottom_illu_data",
+            "--bottom_illu_ventral_det_data",
             action="store",
-            dest="bottom_illu_data",
+            dest="bottom_illu_ventral_det_data",
             default=None,
             type=str,
         )
 
         p.add_argument(
-            "--left_illu_data",
+            "--top_illu_dorsal_det_data",
             action="store",
-            dest="left_illu_data",
+            dest="top_illu_dorsal_det_data",
+            default=None,
+            type=str,
+        )
+        p.add_argument(
+            "--bottom_illu_dorsal_det_data",
+            action="store",
+            dest="bottom_illu_dorsal_det_data",
             default=None,
             type=str,
         )
 
         p.add_argument(
-            "--right_illu_data",
+            "--left_illu_ventral_det_data",
             action="store",
-            dest="right_illu_data",
+            dest="left_illu_ventral_det_data",
+            default=None,
+            type=str,
+        )
+
+        p.add_argument(
+            "--right_illu_ventral_det_data",
+            action="store",
+            dest="right_illu_ventral_det_data",
+            default=None,
+            type=str,
+        )
+
+        p.add_argument(
+            "--left_illu_dorsal_det_data",
+            action="store",
+            dest="left_illu_dorsal_det_data",
+            default=None,
+            type=str,
+        )
+        p.add_argument(
+            "--right_illu_dorsal_det_data",
+            action="store",
+            dest="right_illu_dorsal_det_data",
             default=None,
             type=str,
         )
@@ -169,7 +244,6 @@ class Args(argparse.Namespace):
             dest="save_path",
             type=str,
         )
-
         p.add_argument(
             "--save_folder",
             action="store",
@@ -178,31 +252,25 @@ class Args(argparse.Namespace):
         )
 
         p.add_argument(
-            "--camera_position",
-            action="store",
-            dest="camera_position",
-            default="",
-            type=str,
-        )
-
-        p.add_argument(
-            "--cam_pos",
-            action="store",
-            dest="cam_pos",
-            default="front",
-            type=str,
-        )
-
-        p.add_argument(
-            "--sparse_sample",
-            type=bool_args,
-            default="False",
-        )
-
-        p.add_argument(
             "--save_separate_results",
             type=bool_args,
             default="False",
+        )
+
+        p.add_argument(
+            "--z_spacing",
+            action="store",
+            dest="z_spacing",
+            default=None,
+            type=float,
+        )
+
+        p.add_argument(
+            "--xy_spacing",
+            action="store",
+            dest="xy_spacing",
+            default=None,
+            type=float,
         )
 
         p.add_argument(
@@ -222,7 +290,7 @@ def main():
         args = Args()
         dbg = args.debug
 
-        exe = FUSE_illu(
+        exe = FUSE_det(
             args.require_precropping,
             args.precropping_params,
             args.resample_ratio,
@@ -230,21 +298,31 @@ def main():
             args.poly_order,
             args.n_epochs,
             args.require_segmentation,
+            args.skip_illuFusion,
+            args.destripe_preceded,
+            args.destripe_params,
             args.device,
         )
         exe.train(
+            args.require_registration,
+            args.require_flipping_along_illu_for_dorsaldet,
+            args.require_flipping_along_det_for_dorsaldet,
             args.data_path,
             args.sample_name,
-            args.top_illu_data,
-            args.bottom_illu_data,
-            args.left_illu_data,
-            args.right_illu_data,
+            args.sparse_sample,
+            args.top_illu_ventral_det_data,
+            args.bottom_illu_ventral_det_data,
+            args.top_illu_dorsal_det_data,
+            args.bottom_illu_dorsal_det_data,
+            args.left_illu_ventral_det_data,
+            args.right_illu_ventral_det_data,
+            args.left_illu_dorsal_det_data,
+            args.right_illu_dorsal_det_data,
             args.save_path,
             args.save_folder,
             args.save_separate_results,
-            args.sparse_sample,
-            args.cam_pos,
-            args.camera_position,
+            args.z_spacing,
+            args.xy_spacing,
         )
 
     except Exception as e:

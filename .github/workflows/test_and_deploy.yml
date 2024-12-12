@@ -22,7 +22,7 @@ jobs:
         pip install .[test] --verbose
     - name: Test with pytest
       run: |
-        pytest -v FUSE/tests/
+        pytest -v lsfm_fuse/tests/
     - name: Upload codecov
       uses: codecov/codecov-action@v1
 
@@ -41,7 +41,7 @@ jobs:
         pip install .[test] --verbose
     - name: Lint with flake8
       run: |
-        flake8 FUSE --count --verbose --show-source --statistics
+        flake8 lsfm_fuse --count --verbose --show-source --statistics
     - name: Check with black
       run: |
-        black --check FUSE
+        black --check lsfm_fuse

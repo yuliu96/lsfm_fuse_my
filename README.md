@@ -1,6 +1,6 @@
-# Leonardo-FUSE (LSFM Fusion in Python)
+# lsfm_fuse (LSFM Fusion in Python)
 
-[![Build Status](https://github.com/peng-lab/Leonardo-FUSE/workflows/Build%20Main/badge.svg)](https://github.com/peng-lab/Leonardo-FUSE/actions)
+[![Build Status](https://github.com/peng-lab/lsfm_fuse/workflows/Build%20Main/badge.svg)](https://github.com/peng-lab/lsfm_fuse/actions)
 
 A Python implementation of LSFM fusion method (former BigFUSE)
 
@@ -17,7 +17,7 @@ Meanwhile fusion result, together with the intermediate results, will be saved i
 
 if "A.tif" and "B.tif" are illuminated from top and bottom respectively (in the image space):
 ```python
-from FUSE import FUSE_illu
+from lsfm_fuse import FUSE_illu
 
 exe = FUSE_illu()   ###to run with default parameters for training
 out = exe.train(data_path = data_path,
@@ -43,7 +43,7 @@ out = exe.train(data_path = data_path,
                 save_folder = save_folder,
                 )
 ```
-Alternatively, FUSE-illu can be initialized with user-defined training parameters, a full list of input arguments in `__init__` is here:
+Alternatively, FUSE_illu can be initialized with user-defined training parameters, a full list of input arguments in `__init__` is here:
 ```
 require_precropping: bool = True,
 precropping_params: list[int, int, int, int] = [],
@@ -61,7 +61,7 @@ device: str = "cuda",
 (2) Provide two arrays, i.e., the stacks to be processed, and necessary parameters (suitable for use in napari)
 suppose we have two to-be-processed volumes `img_arr1` (illuminated from the top) and `img_arr2` (illuminated from the bottom) that have been read in as a np.ndarray or dask.array.core.Array
 ```python
-from FUSE import FUSE_illu
+from lsfm_fuse import FUSE_illu
 
 exe = FUSE_illu()   ###to run with default parameters for training
 out = exe.train(data_path = data_path,
@@ -125,13 +125,6 @@ usage: run_fuse_illu --data_path
 ```
 
 
-
-
-
-
-
-
-
 ### Fusing four datasets with dual-sided illumination and dual-sided detection
 #### Use as Python API
 (1) Provide two filenames
@@ -141,7 +134,7 @@ Meanwhile fusion result, together with the intermediate results, will be saved i
 
 if "A.tif", "B.tif", "C.tif" and "D.tif" are top illuminated+ventral detected, bottom illuminated+ventral detected, top illuminated+dorsal detected, bottom illuminated+dorsal detected (in the image space), respectively:
 ```python
-from FUSE import FUSE_det
+from lsfm_fuse import FUSE_det
 
 exe = FUSE_det()   ###to run with default parameters for training
 out = exe.train(data_path = data_path,
@@ -196,7 +189,7 @@ device: str = "cpu",
 (2) Provide four arrays, i.e., the stacks to be processed, and necessary parameters (suitable for use in napari)
 suppose we have four to-be-processed volumes `img_arr1` (top illuminated+ventral detected) and `img_arr2` (bottom illuminated+ventral detected), `img_arr3` (top illuminated+dorsal detected) and `img_arr4` (bottom illuminated+dorsal detected). All of them have been read in as a np.ndarray or dask.array.core.Array:
 ```python
-from FUSE import FUSE_det
+from lsfm_fuse import FUSE_det
 
 exe = FUSE_det()   ###to run with default parameters for training
 out = exe.train(data_path = data_path,
@@ -267,8 +260,8 @@ usage: run_fuse_det --data_path
 
 ## Installation
 
-**Stable Release:** `pip install FUSE`<br>
-**Development Head:** `pip install git+https://github.com/peng-lab/Leonardo-FUSE.git`
+**Stable Release:** `pip install lsfm_fuse`<br>
+**Development Head:** `pip install git+https://github.com/peng-lab/lsfm_fuse.git`
 
 
 ## Development
