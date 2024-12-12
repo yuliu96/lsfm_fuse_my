@@ -81,10 +81,10 @@ import h5py
 
 
 def define_registration_params(
-    use_exist_reg: bool = True,
+    use_exist_reg: bool = False,
     require_reg_finetune: bool = True,
     axial_downsample: int = 1,
-    lateral_downsample: int = 1,
+    lateral_downsample: int = 2,
 ):
     kwargs = locals()
     return kwargs
@@ -507,7 +507,7 @@ class FUSE_det:
                         xy_downsample_ratio,
                         z_spacing,
                         xy_spacing,
-                        window_size=[5, 59],
+                        window_size=self.train_params["window_size"],
                     )
                 else:
                     print("downsampled fusion only supports .h5 files for now.")
@@ -772,7 +772,10 @@ class FUSE_det:
         if require_registration:
             if self.registration_params["use_exist_reg"] == False:
                 run_coarse = 1
-                run_fine = 1
+                if self.registration_params["require_reg_finetune"]:
+                    run_fine = 1
+                else:
+                    run_fine = 0
             else:
                 if os.path.exists(
                     os.path.join(
@@ -795,40 +798,46 @@ class FUSE_det:
                 ):
                     run_coarse = 0
                     if self.registration_params["require_reg_finetune"]:
-                        if os.path.exists(
-                            os.path.join(
-                                save_path,
-                                self.sample_params[
-                                    "topillu_ventraldet_data_saving_name"
-                                ],
-                                "regInfo_refine.npy",
-                            )
-                        ) * os.path.exists(
-                            os.path.join(
-                                save_path,
-                                self.sample_params[
-                                    "topillu_dorsaldet_data_saving_name"
-                                ],
-                                "{}".format(
-                                    illu_name_
-                                    if not det_only_flag
-                                    else self.sample_params[
-                                        "topillu_dorsaldet_data_saving_name"
-                                    ]
+                        if self.registration_params["require_reg_finetune"]:
+                            if os.path.exists(
+                                os.path.join(
+                                    save_path,
+                                    self.sample_params[
+                                        "topillu_ventraldet_data_saving_name"
+                                    ],
+                                    "regInfo_refine.npy",
                                 )
-                                + "_reg.tif",
-                            )
-                        ):
-                            run_fine = 0
+                            ) * os.path.exists(
+                                os.path.join(
+                                    save_path,
+                                    self.sample_params[
+                                        "topillu_dorsaldet_data_saving_name"
+                                    ],
+                                    "{}".format(
+                                        illu_name
+                                        if not det_only_flag
+                                        else self.sample_params[
+                                            "topillu_dorsaldet_data_saving_name"
+                                        ]
+                                    )
+                                    + "_reg.tif",
+                                )
+                            ):
+                                run_fine = 0
+                            else:
+                                run_fine = 1
                         else:
-                            run_fine = 1
+                            run_fine = 0
                     else:
                         run_fine = 0
 
                 else:
                     print("\nCannot skip registration...")
                     run_coarse = 1
-                    run_fine = 1
+                    if self.registration_params["require_reg_finetune"]:
+                        run_fine = 1
+                    else:
+                        run_fine = 0
 
             if run_coarse:
                 print("\nRegister...")
@@ -1276,7 +1285,7 @@ class FUSE_det:
                     },
                 )
             else:
-                print("\nSkip fine registration...")
+                print("\nSkip fine registration...\n")
 
             if not det_only_flag:
                 regInfo = np.load(
@@ -1314,7 +1323,7 @@ class FUSE_det:
                         "translating_information.npy",
                     ),
                     allow_pickle=True,
-                )["T2"]
+                ).item()["T2"]
                 for f, f_name in zip(
                     ["top", "bottom"] if (not T_flag) else ["left", "right"],
                     ["top", "bottom"],
@@ -1804,11 +1813,15 @@ class FUSE_det:
             n = len(np.arange(n_c)[:: self.train_params["resample_ratio"]])
             del rawPlanesTopO
             if require_registration:
-                reg_level = (
-                    "_reg"
-                    if self.registration_params["require_reg_finetune"]
-                    else "_coarse_reg"
-                )
+                if det_only_flag:
+                    reg_level = (
+                        "_reg"
+                        if self.registration_params["require_reg_finetune"]
+                        else "_coarse_reg"
+                    )
+                else:
+                    reg_level = "_reg"
+
                 bottom_handle = AICSImage(
                     os.path.join(
                         save_path,
@@ -1826,8 +1839,7 @@ class FUSE_det:
                                 else "bottom"
                             )
                         ]
-                        + "{}.tif",
-                        format(reg_level),
+                        + "{}.tif".format(reg_level),
                     )
                 )
             else:
