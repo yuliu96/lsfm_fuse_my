@@ -149,9 +149,13 @@ class FUSE_illu:
             left_illu_data=left_illu_data,
             right_illu_data=right_illu_data,
             save_path=new_dir_path,
+            save_separate_results=params["save_separate_results"],
+            sparse_sample=params["sparse_sample"],
+            cam_pos=params["cam_pos"],
             display=False,
             # TODO: more parameters?
         )
+
         if not params["keep_intermediates"]:
             # Clean up the intermediate directory
             shutil.rmtree(new_dir_path)

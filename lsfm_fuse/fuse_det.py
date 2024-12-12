@@ -81,10 +81,10 @@ import h5py
 
 
 def define_registration_params(
-    skip_registration: bool = True,
-    skip_transformation: bool = True,
-    axial_upsample: int = 1,
-    lateral_upsample: int = 1,
+    use_exist_reg: bool = True,
+    require_reg_finetune: bool = True,
+    axial_downsample: int = 1,
+    lateral_downsample: int = 1,
 ):
     kwargs = locals()
     return kwargs
@@ -124,7 +124,6 @@ class FUSE_det:
         n_epochs: int = 50,
         require_segmentation: bool = True,
         skip_illuFusion: bool = True,
-        destripe_params: str = "",
         device: str = None,
         registration_params=None,
     ):
@@ -145,7 +144,6 @@ class FUSE_det:
         self.train_params.update(
             {
                 "skip_illuFusion": skip_illuFusion,
-                "destripe_params": destripe_params,
             }
         )
         self.train_params["kernel2d"] = (
@@ -271,6 +269,15 @@ class FUSE_det:
         new_dir_path = os.path.join(tmp_path, current_time)
         os.makedirs(new_dir_path, exist_ok=True)
 
+        xy_downsample_ratio = (
+            None
+            if params["xy_downsample_ratio"] == 1
+            else params["xy_downsample_ratio"]
+        )
+        z_downsample_ratio = (
+            None if params["z_downsample_ratio"] == 1 else params["z_downsample_ratio"]
+        )
+
         output_image = self.train(
             require_registration=require_registration,
             require_flipping_along_illu_for_dorsaldet=params["require_flip_illu"],
@@ -290,6 +297,10 @@ class FUSE_det:
             xy_spacing=xy_spacing,
             left_right=left_right,
             display=False,
+            sparse_sample=params["sparse_sample"],
+            save_separate_results=params["save_separate_results"],
+            xy_downsample_ratio=xy_downsample_ratio,
+            z_downsample_ratio=z_downsample_ratio,
             # TODO: more parameters?
         )
         if not params["keep_intermediates"]:
@@ -539,13 +550,12 @@ class FUSE_det:
             if (z_spacing is None) or (xy_spacing is None):
                 print("spacing information is missing.")
                 return
-        illu_name = "illuFusionResult{}{}".format(
+        illu_name = "illuFusionResult{}".format(
             (
                 ""
                 if self.train_params["require_segmentation"]
                 else "_without_segmentation"
-            ),
-            self.train_params["destripe_params"],
+            )
         )
         if not os.path.exists(save_path):
             print("saving path does not exist.")
@@ -760,15 +770,67 @@ class FUSE_det:
         data_path = os.path.join(data_path, sample_name)
 
         if require_registration:
-            if (
-                not os.path.exists(
+            if self.registration_params["use_exist_reg"] == False:
+                run_coarse = 1
+                run_fine = 1
+            else:
+                if os.path.exists(
                     os.path.join(
                         save_path,
                         self.sample_params["topillu_ventraldet_data_saving_name"],
                     )
                     + "/regInfo.npy"
-                )
-            ) or (self.registration_params["skip_registration"] is False):
+                ) * os.path.exists(
+                    os.path.join(
+                        save_path,
+                        self.sample_params["topillu_dorsaldet_data_saving_name"],
+                        "{}_coarse_reg.tif".format(
+                            illu_name
+                            if not det_only_flag
+                            else self.sample_params[
+                                "topillu_dorsaldet_data_saving_name"
+                            ]
+                        ),
+                    )
+                ):
+                    run_coarse = 0
+                    if self.registration_params["require_reg_finetune"]:
+                        if os.path.exists(
+                            os.path.join(
+                                save_path,
+                                self.sample_params[
+                                    "topillu_ventraldet_data_saving_name"
+                                ],
+                                "regInfo_refine.npy",
+                            )
+                        ) * os.path.exists(
+                            os.path.join(
+                                save_path,
+                                self.sample_params[
+                                    "topillu_dorsaldet_data_saving_name"
+                                ],
+                                "{}".format(
+                                    illu_name_
+                                    if not det_only_flag
+                                    else self.sample_params[
+                                        "topillu_dorsaldet_data_saving_name"
+                                    ]
+                                )
+                                + "_reg.tif",
+                            )
+                        ):
+                            run_fine = 0
+                        else:
+                            run_fine = 1
+                    else:
+                        run_fine = 0
+
+                else:
+                    print("\nCannot skip registration...")
+                    run_coarse = 1
+                    run_fine = 1
+
+            if run_coarse:
                 print("\nRegister...")
                 print("read in...")
 
@@ -981,18 +1043,32 @@ class FUSE_det:
                     self.sample_params["z_spacing"],
                 )
                 del moving_view_uint16
-            else:
-                print("\nSkip registration...")
-
-            if (
-                not os.path.exists(
+                np.save(
                     os.path.join(
                         save_path,
                         self.sample_params["topillu_ventraldet_data_saving_name"],
-                        "regInfo_refine.npy",
-                    )
+                        "translating_information.npy",
+                    ),
+                    {
+                        "AffineTransform_float_3_3_inverse": reg_info[
+                            "AffineTransform_float_3_3_inverse"
+                        ],
+                        "fixed_inverse": reg_info["fixed_inverse"],
+                        "AffineMapZXY": reg_info["AffineMapZXY"],
+                        "T2": None,
+                        "zback": zback,
+                        "z": z,
+                        "m": m,
+                        "n": n,
+                        "padding_z": padding_z,
+                        "T_flag": T_flag,
+                        "flip_axes": flip_axes,
+                    },
                 )
-            ) or (self.registration_params["skip_transformation"] is False):
+            else:
+                print("\nSkip coarse registration...")
+
+            if run_fine:
                 print("refine registration...")
 
                 if not det_only_flag:
@@ -1199,72 +1275,70 @@ class FUSE_det:
                         "flip_axes": flip_axes,
                     },
                 )
+            else:
+                print("\nSkip fine registration...")
 
-                if not det_only_flag:
-                    for f, f_name in zip(
-                        ["top", "bottom"] if (not T_flag) else ["left", "right"],
-                        ["top", "bottom"],
-                    ):
-                        if isinstance(locals()[f + "_illu_dorsal_det_data"], str):
-                            f_handle = AICSImage(
-                                os.path.join(
-                                    data_path, locals()[f + "_illu_dorsal_det_data"]
-                                )
-                            )
-                        else:
-                            f_handle = AICSImage(locals()[f + "_illu_dorsal_det_data"])
-                        inputs = f_handle.get_image_data(
-                            "ZXY" if T_flag else "ZYX", T=0, C=0
-                        )
-                        trans_path = os.path.join(
-                            save_path,
-                            self.sample_params[
-                                f_name + "illu_dorsaldet_data_saving_name"
-                            ],
-                            self.sample_params[
-                                f_name + "illu_dorsaldet_data_saving_name"
-                            ]
-                            + "_reg.tif",
-                        )
-
-                        volumeTranslate_compose(
-                            inputs,
-                            regInfo["AffineTransform_float_3_3_inverse"],
-                            regInfo["fixed_inverse"],
-                            AffineMapZXY,
-                            T2,
-                            zback,
-                            z,
-                            m,
-                            n,
-                            padding_z,
-                            trans_path,
-                            T_flag,
-                            flip_axes,
-                            device=self.train_params["device"],
-                            xy_spacing=self.sample_params["xy_spacing"],
-                            z_spacing=self.sample_params["z_spacing"],
-                        )
-
-                    fl = "fusionBoundary_xy{}".format(
-                        ""
-                        if self.train_params["require_segmentation"]
-                        else "_without_segmentation"
-                    )
-                    f0 = os.path.join(
+            if not det_only_flag:
+                regInfo = np.load(
+                    os.path.join(
                         save_path,
-                        self.sample_params["topillu_dorsaldet_data_saving_name"],
-                        fl + ".tif",
+                        self.sample_params["topillu_ventraldet_data_saving_name"],
+                        "regInfo.npy",
+                    ),
+                    allow_pickle=True,
+                ).item()
+                AffineMapZXY = regInfo["AffineMapZXY"]
+                zback = regInfo["zback"]
+                z = regInfo["z"]
+                m = regInfo["m"]
+                n = regInfo["n"]
+                padding_z = (
+                    boundaryInclude(
+                        regInfo,
+                        (
+                            z + int(np.ceil(-AffineMapZXY[0]))
+                            if AffineMapZXY[0] < 0
+                            else z
+                        )
+                        * self.sample_params["z_spacing"],
+                        m * self.sample_params["xy_spacing"],
+                        n * self.sample_params["xy_spacing"],
+                        spacing=self.sample_params["z_spacing"],
                     )
-                    boundary = tifffile.imread(f0).astype(np.float32)
-                    mask = np.arange(m)[None, :, None] > boundary[:, None, :]
+                    / self.sample_params["z_spacing"]
+                )
+                T2 = np.load(
+                    os.path.join(
+                        save_path,
+                        self.sample_params["topillu_ventraldet_data_saving_name"],
+                        "translating_information.npy",
+                    ),
+                    allow_pickle=True,
+                )["T2"]
+                for f, f_name in zip(
+                    ["top", "bottom"] if (not T_flag) else ["left", "right"],
+                    ["top", "bottom"],
+                ):
+                    if isinstance(locals()[f + "_illu_dorsal_det_data"], str):
+                        f_handle = AICSImage(
+                            os.path.join(
+                                data_path, locals()[f + "_illu_dorsal_det_data"]
+                            )
+                        )
+                    else:
+                        f_handle = AICSImage(locals()[f + "_illu_dorsal_det_data"])
+                    inputs = f_handle.get_image_data(
+                        "ZXY" if T_flag else "ZYX", T=0, C=0
+                    )
                     trans_path = os.path.join(
                         save_path,
-                        self.sample_params["topillu_dorsaldet_data_saving_name"],
-                        fl + "_reg.npy",
+                        self.sample_params[f_name + "illu_dorsaldet_data_saving_name"],
+                        self.sample_params[f_name + "illu_dorsaldet_data_saving_name"]
+                        + "_reg.tif",
                     )
+
                     volumeTranslate_compose(
-                        mask,
+                        inputs,
                         regInfo["AffineTransform_float_3_3_inverse"],
                         regInfo["fixed_inverse"],
                         AffineMapZXY,
@@ -1281,6 +1355,42 @@ class FUSE_det:
                         xy_spacing=self.sample_params["xy_spacing"],
                         z_spacing=self.sample_params["z_spacing"],
                     )
+
+                fl = "fusionBoundary_xy{}".format(
+                    ""
+                    if self.train_params["require_segmentation"]
+                    else "_without_segmentation"
+                )
+                f0 = os.path.join(
+                    save_path,
+                    self.sample_params["topillu_dorsaldet_data_saving_name"],
+                    fl + ".tif",
+                )
+                boundary = tifffile.imread(f0).astype(np.float32)
+                mask = np.arange(m)[None, :, None] > boundary[:, None, :]
+                trans_path = os.path.join(
+                    save_path,
+                    self.sample_params["topillu_dorsaldet_data_saving_name"],
+                    fl + "_reg.npy",
+                )
+                volumeTranslate_compose(
+                    mask,
+                    regInfo["AffineTransform_float_3_3_inverse"],
+                    regInfo["fixed_inverse"],
+                    AffineMapZXY,
+                    T2,
+                    zback,
+                    z,
+                    m,
+                    n,
+                    padding_z,
+                    trans_path,
+                    T_flag,
+                    flip_axes,
+                    device=self.train_params["device"],
+                    xy_spacing=self.sample_params["xy_spacing"],
+                    z_spacing=self.sample_params["z_spacing"],
+                )
 
         print("\nLocalize sample...")
         print("read in...")
@@ -1316,6 +1426,11 @@ class FUSE_det:
                     illu_front = illu_front.compute()
 
         if (not det_only_flag) or require_registration:
+            reg_level = (
+                "_reg"
+                if self.registration_params["require_reg_finetune"]
+                else "_coarse_reg"
+            )
             f_handle = AICSImage(
                 os.path.join(
                     save_path,
@@ -1326,7 +1441,7 @@ class FUSE_det:
                         else self.sample_params["topillu_dorsaldet_data_saving_name"]
                     )
                     + "{}.tif".format(
-                        "_reg" if require_registration else "",
+                        reg_level if require_registration else "",
                     ),
                 )
             )
@@ -1505,8 +1620,14 @@ class FUSE_det:
                 bottom_name = (
                     "bottom" if require_flipping_along_illu_for_dorsaldet else "top"
                 )
+                reg_level = "_reg"
             else:
                 bottom_name = "top"
+                reg_level = (
+                    "_reg"
+                    if self.registration_params["require_reg_finetune"]
+                    else "_coarse_reg"
+                )
             bottom_handle = AICSImage(
                 os.path.join(
                     save_path,
@@ -1516,7 +1637,7 @@ class FUSE_det:
                     self.sample_params[
                         "{}illu_dorsaldet_data_saving_name".format(bottom_name)
                     ]
-                    + "_reg.tif",
+                    + "{}.tif".format(reg_level),
                 )
             )
             rawPlanesBottomO = bottom_handle.get_image_data(
@@ -1683,6 +1804,11 @@ class FUSE_det:
             n = len(np.arange(n_c)[:: self.train_params["resample_ratio"]])
             del rawPlanesTopO
             if require_registration:
+                reg_level = (
+                    "_reg"
+                    if self.registration_params["require_reg_finetune"]
+                    else "_coarse_reg"
+                )
                 bottom_handle = AICSImage(
                     os.path.join(
                         save_path,
@@ -1700,7 +1826,8 @@ class FUSE_det:
                                 else "bottom"
                             )
                         ]
-                        + "_reg.tif",
+                        + "{}.tif",
+                        format(reg_level),
                     )
                 )
             else:
@@ -1914,6 +2041,11 @@ class FUSE_det:
                     illu_front = illu_front.compute()
 
         if require_registration:
+            reg_level = (
+                "_reg"
+                if self.registration_params["require_reg_finetune"]
+                else "_coarse_reg"
+            )
             f_handle = AICSImage(
                 os.path.join(
                     save_path,
@@ -1923,7 +2055,7 @@ class FUSE_det:
                         if not det_only_flag
                         else self.sample_params["topillu_dorsaldet_data_saving_name"]
                     )
-                    + "_reg.tif",
+                    + "{}.tif".format(reg_level),
                 )
             )
             illu_back = f_handle.get_image_data("ZXY" if T_flag else "ZYX", T=0, C=0)
@@ -3181,8 +3313,8 @@ def fineReg(
 
     size = (
         sys.getsizeof(respective_view_uint8)
-        / registration_params["axial_upsample"]
-        / (registration_params["lateral_upsample"]) ** 2
+        / registration_params["axial_downsample"]
+        / (registration_params["lateral_downsample"]) ** 2
     )
     if size < 209715344:
         s = 0
@@ -3192,7 +3324,7 @@ def fineReg(
             np.ones(
                 int(
                     moving_view_uint8[0].size
-                    / (registration_params["lateral_upsample"]) ** 2
+                    / (registration_params["lateral_downsample"]) ** 2
                 ),
                 dtype=np.uint8,
             )
@@ -3205,30 +3337,30 @@ def fineReg(
     print("to ANTS...")
     staticANTS = ants.from_numpy(
         respective_view_uint8[
-            s : e : registration_params["axial_upsample"],
-            :: registration_params["lateral_upsample"],
-            :: registration_params["lateral_upsample"],
+            s : e : registration_params["axial_downsample"],
+            :: registration_params["lateral_downsample"],
+            :: registration_params["lateral_downsample"],
         ]
     )
     movingANTS = ants.from_numpy(
         moving_view_uint8[
-            s : e : registration_params["axial_upsample"],
-            :: registration_params["lateral_upsample"],
-            :: registration_params["lateral_upsample"],
+            s : e : registration_params["axial_downsample"],
+            :: registration_params["lateral_downsample"],
+            :: registration_params["lateral_downsample"],
         ]
     )
     movingANTS.set_spacing(
         (
-            z_spacing * registration_params["axial_upsample"],
-            xy_spacing * registration_params["lateral_upsample"],
-            xy_spacing * registration_params["lateral_upsample"],
+            z_spacing * registration_params["axial_downsample"],
+            xy_spacing * registration_params["lateral_downsample"],
+            xy_spacing * registration_params["lateral_downsample"],
         )
     )
     staticANTS.set_spacing(
         (
-            z_spacing * registration_params["axial_upsample"],
-            xy_spacing * registration_params["lateral_upsample"],
-            xy_spacing * registration_params["lateral_upsample"],
+            z_spacing * registration_params["axial_downsample"],
+            xy_spacing * registration_params["lateral_downsample"],
+            xy_spacing * registration_params["lateral_downsample"],
         )
     )
     del moving_view_uint8, respective_view_uint8
