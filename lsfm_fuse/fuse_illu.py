@@ -105,6 +105,7 @@ class FUSE_illu:
             .to(torch.float)
             .to(self.train_params["device"])
         )
+        print(self.train_params)
 
     def train_from_params(self, params: dict):
         """Parses training parameters from dictionary"""

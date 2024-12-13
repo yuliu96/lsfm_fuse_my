@@ -165,6 +165,7 @@ class FUSE_det:
             self.registration_params = define_registration_params()
         else:
             self.registration_params = define_registration_params(**registration_params)
+        print(self.train_params)
 
     def train_from_params(
         self,
