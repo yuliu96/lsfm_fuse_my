@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from scipy import signal
 import shutil
 import gc
-from FUSE.NSCT import NSCTdec, NSCTrec
+from lsfm_fuse.NSCT import NSCTdec, NSCTrec
 import matplotlib.pyplot as plt
 import ants
 import tifffile
