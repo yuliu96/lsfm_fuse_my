@@ -165,7 +165,6 @@ class FUSE_det:
             self.registration_params = define_registration_params()
         else:
             self.registration_params = define_registration_params(**registration_params)
-        print(self.train_params)
 
     def train_from_params(
         self,
@@ -337,6 +336,7 @@ class FUSE_det:
         z_downsample_ratio: int = None,
         display: bool = True,
     ):
+        print(save_separate_results)
         if (xy_downsample_ratio is None) or (xy_downsample_ratio is None):
             result = self.train_down_sample(
                 require_registration,

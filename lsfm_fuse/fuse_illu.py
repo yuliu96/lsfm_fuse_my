@@ -105,7 +105,6 @@ class FUSE_illu:
             .to(torch.float)
             .to(self.train_params["device"])
         )
-        print(self.train_params)
 
     def train_from_params(self, params: dict):
         """Parses training parameters from dictionary"""
@@ -178,6 +177,7 @@ class FUSE_illu:
         camera_position: str = "",
         display: bool = True,
     ):
+        print(save_separate_results)
         data_path = os.path.join(data_path, sample_name)
         if not os.path.exists(save_path):
             print("saving path does not exist.")
