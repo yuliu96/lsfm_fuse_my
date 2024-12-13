@@ -336,7 +336,6 @@ class FUSE_det:
         z_downsample_ratio: int = None,
         display: bool = True,
     ):
-        print(save_separate_results)
         if (xy_downsample_ratio is None) or (xy_downsample_ratio is None):
             result = self.train_down_sample(
                 require_registration,
@@ -769,7 +768,7 @@ class FUSE_det:
             )
 
         data_path = os.path.join(data_path, sample_name)
-
+        print(save_separate_results)
         if require_registration:
             if self.registration_params["use_exist_reg"] == False:
                 run_coarse = 1

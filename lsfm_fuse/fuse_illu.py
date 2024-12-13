@@ -177,7 +177,6 @@ class FUSE_illu:
         camera_position: str = "",
         display: bool = True,
     ):
-        print(save_separate_results)
         data_path = os.path.join(data_path, sample_name)
         if not os.path.exists(save_path):
             print("saving path does not exist.")
@@ -287,6 +286,7 @@ class FUSE_illu:
             rawPlanes_bottom = rawPlanes_bottom[::-1, :, :]
 
         print("\nLocalize sample...")
+        print(save_separate_results)
         cropInfo, MIP_info = self.localizingSample(rawPlanes_top, rawPlanes_bottom)
         print(cropInfo)
         if self.train_params["require_precropping"]:
