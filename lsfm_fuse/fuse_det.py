@@ -505,6 +505,7 @@ class FUSE_det:
                         ),
                         z_downsample_ratio,
                         xy_downsample_ratio,
+                        save_separate_results,
                         z_spacing,
                         xy_spacing,
                         window_size=self.train_params["window_size"],
@@ -768,7 +769,6 @@ class FUSE_det:
             )
 
         data_path = os.path.join(data_path, sample_name)
-        print(save_separate_results)
         if require_registration:
             if self.registration_params["use_exist_reg"] == False:
                 run_coarse = 1
@@ -2147,75 +2147,74 @@ class FUSE_det:
 
         else:
             invalid_region = np.zeros((s, m0, n0), dtype=bool)
+        if save_separate_results:
+            if os.path.exists(
+                os.path.join(
+                    save_path,
+                    self.sample_params["topillu_ventraldet_data_saving_name"],
+                    "fuse_det_mask",
+                )
+            ):
+                shutil.rmtree(
+                    os.path.join(
+                        save_path,
+                        self.sample_params["topillu_ventraldet_data_saving_name"],
+                        "fuse_det_mask",
+                    )
+                )
+            os.makedirs(
+                os.path.join(
+                    save_path,
+                    self.sample_params["topillu_ventraldet_data_saving_name"],
+                    "fuse_det_mask",
+                )
+            )
 
         if not det_only_flag:
-            if save_separate_results:
-                reconVol, reconVol_separate = fusionResultFour(
-                    boundaryTop,
-                    boundaryBottom,
-                    boundaryEFront,
-                    boundaryEBack,
-                    illu_front,
-                    illu_back,
-                    s,
-                    m0,
-                    n0,
+            reconVol = fusionResultFour(
+                T_flag,
+                boundaryTop,
+                boundaryBottom,
+                boundaryEFront,
+                boundaryEBack,
+                illu_front,
+                illu_back,
+                s,
+                m0,
+                n0,
+                save_path,
+                self.train_params["device"],
+                self.sample_params,
+                invalid_region,
+                save_separate_results,
+                path=os.path.join(
                     save_path,
-                    self.train_params["device"],
-                    self.sample_params,
-                    invalid_region,
-                    save_separate_results,
-                    GFr=copy.deepcopy(self.train_params["window_size"]),
-                )
-            else:
-                reconVol = fusionResultFour(
-                    boundaryTop,
-                    boundaryBottom,
-                    boundaryEFront,
-                    boundaryEBack,
-                    illu_front,
-                    illu_back,
-                    s,
-                    m0,
-                    n0,
-                    save_path,
-                    self.train_params["device"],
-                    self.sample_params,
-                    invalid_region,
-                    save_separate_results,
-                    GFr=copy.deepcopy(self.train_params["window_size"]),
-                )
+                    self.sample_params["topillu_ventraldet_data_saving_name"],
+                    "fuse_det_mask",
+                ),
+                GFr=copy.deepcopy(self.train_params["window_size"]),
+            )
         else:
-            if save_separate_results:
-                reconVol, reconVol_separate = fusionResult(
-                    illu_front,
-                    illu_back,
-                    boundaryTop,
-                    self.train_params["device"],
-                    save_separate_results,
-                    GFr=copy.deepcopy(self.train_params["window_size"]),
-                )
-            else:
-                reconVol = fusionResult(
-                    illu_front,
-                    illu_back,
-                    boundaryTop,
-                    self.train_params["device"],
-                    save_separate_results,
-                    GFr=copy.deepcopy(self.train_params["window_size"]),
-                )
+            reconVol = fusionResult(
+                T_flag,
+                illu_front,
+                illu_back,
+                boundaryTop,
+                self.train_params["device"],
+                save_separate_results,
+                path=os.path.join(
+                    save_path,
+                    self.sample_params["topillu_ventraldet_data_saving_name"],
+                    "fuse_det_mask",
+                ),
+                GFr=copy.deepcopy(self.train_params["window_size"]),
+            )
 
         if T_flag:
             result = reconVol.swapaxes(1, 2)
-            if save_separate_results:
-                result_separate = reconVol_separate.transpose(0, 1, 3, 2)
         else:
             result = reconVol
-            if save_separate_results:
-                result_separate = reconVol_separate
         del reconVol
-        if save_separate_results:
-            del reconVol_separate
         if display:
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, dpi=200)
             ax1.imshow(result.max(0))
@@ -2244,21 +2243,6 @@ class FUSE_det:
             ),
             result,
         )
-        if save_separate_results:
-            self.save_results(
-                os.path.join(
-                    save_path, self.sample_params["topillu_ventraldet_data_saving_name"]
-                )
-                + "/quadrupleFusionResult_separate{}.tif".format(
-                    (
-                        ""
-                        if self.train_params["require_segmentation"]
-                        else "_without_segmentation"
-                    ),
-                ),
-                result_separate,
-            )
-            del result_separate
         del illu_front, illu_back
         gc.collect()
         return result
@@ -2276,6 +2260,7 @@ class FUSE_det:
         translating_information: str,
         z_upsample_ratio: int = 1,
         xy_upsample_ratio: int = 1,
+        save_separate_results: bool = False,
         z_spacing: int = None,
         xy_spacing: int = None,
         skip_apply_registration: bool = False,
@@ -2477,12 +2462,41 @@ class FUSE_det:
             ).data.numpy()[0, 0]
         )
 
+        if save_separate_results:
+            if os.path.exists(
+                os.path.join(
+                    save_path,
+                    "high_res",
+                    "fuse_det_mask",
+                )
+            ):
+                shutil.rmtree(
+                    os.path.join(
+                        save_path,
+                        "high_res",
+                        "fuse_det_mask",
+                    )
+                )
+            os.makedirs(
+                os.path.join(
+                    save_path,
+                    "high_res",
+                    "fuse_det_mask",
+                )
+            )
+
         reconVol = fusionResult(
+            T_flag,
             ventral_det_data,
             dorsal_det_data,
             boundary,
             self.train_params["device"],
-            False,
+            save_separate_results,
+            path=os.path.join(
+                save_path,
+                "high_res",
+                "fuse_det_mask",
+            ),
             GFr=window_size,
         )
 
@@ -2753,22 +2767,22 @@ class FUSE_det:
 
 
 def fusionResult(
+    T_flag,
     topVol,
     bottomVol,
     boundary,
     device,
     save_separate_results,
+    path,
     GFr=[5, 49],
 ):
     s, m, n = bottomVol.shape
     boundary = boundary[None, None, :, :]
-    if save_separate_results:
-        reconVol_separate = np.empty((s, 2, m, n), dtype=np.uint16)
     mask = np.arange(s)[None, :, None, None]
     GFr[1] = GFr[1] // 4 * 2 + 1
     boundary = mask > boundary
 
-    l_temp = np.concatenate(
+    l = np.concatenate(
         (
             np.zeros(GFr[0] // 2, dtype=np.int32),
             np.arange(s),
@@ -2779,9 +2793,9 @@ def fusionResult(
     recon = np.zeros(bottomVol.shape, dtype=np.uint16)
 
     for ii in tqdm.tqdm(
-        range(GFr[0] // 2, len(l_temp) - GFr[0] // 2), desc="fusion: "
+        range(GFr[0] // 2, len(l) - GFr[0] // 2), desc="fusion: "
     ):  # topVol.shape[0]
-        l_s = l_temp[ii - GFr[0] // 2 : ii + GFr[0] // 2 + 1]
+        l_s = l[ii - GFr[0] // 2 : ii + GFr[0] // 2 + 1]
 
         bottomMask = torch.from_numpy(boundary[:, l_s, :, :]).to(device).to(torch.float)
         topMask = torch.from_numpy((~boundary[:, l_s, :, :])).to(device).to(torch.float)
@@ -2801,25 +2815,32 @@ def fusionResult(
 
         # topVol[l_s, :, :].astype(np.float32)[None]
 
-        a, b, c = fusion_perslice(
-            topVol_tmp[None],
-            bottomVol_tmp[None],
-            topMask,
-            bottomMask,
+        a, c = fusion_perslice(
+            np.stack(
+                (
+                    topVol_tmp,
+                    bottomVol_tmp,
+                ),
+                0,
+            ),
+            torch.cat((topMask, bottomMask), 0),
             GFr,
             device,
         )
         if save_separate_results:
-            recon[ind], reconVol_separate[ind, 0], reconVol_separate[ind, 1] = a, b, c
-        else:
-            recon[ind] = a
-    if save_separate_results:
-        return recon, reconVol_separate
-    else:
-        return recon
+            np.savez_compressed(
+                os.path.join(
+                    path,
+                    "{:0>{}}".format(ind, 5) + ".npz",
+                ),
+                mask=c.transpose(0, 2, 1) if T_flag else c,
+            )
+        recon[ind] = a
+    return recon
 
 
 def fusionResultFour(
+    T_flag,
     boundaryTop,
     boundaryBottom,
     boundaryFront,
@@ -2834,6 +2855,7 @@ def fusionResultFour(
     sample_params,
     invalid_region,
     save_separate_results,
+    path,
     GFr=49,
 ):
     zmax = boundaryBack.shape[0]
@@ -2853,25 +2875,20 @@ def fusionResultFour(
             ),
             0,
         )
-    mask_front = mask > boundaryFront[:, None, :]  # 1是下面，0是上面
+    mask_front = mask > boundaryFront[:, None, :]  ###1是下面，0是上面
     if boundaryBack.ndim == 2:
         mask_back = mask > boundaryBack[:, None, :]
     else:
         mask_back = boundaryBack
     mask_ztop = (
         np.arange(s)[:, None, None] > boundaryTop[None, :, :]
-    )  # 1是后面，0是前面
+    )  ###1是后面，0是前面
     mask_zbottom = (
         np.arange(s)[:, None, None] > boundaryBottom[None, :, :]
-    )  # 1是后面，0是前面
+    )  ###1是后面，0是前面
 
     listPair1 = {"1": "4", "2": "3", "4": "1", "3": "2"}
     reconVol = np.empty(illu_back.shape, dtype=np.uint16)
-    if save_separate_results:
-        reconVol_separate = np.empty(
-            (illu_back.shape[0], 2, illu_back.shape[1], illu_back.shape[2]),
-            dtype=np.uint16,
-        )
     allList = [
         value
         for key, value in sample_params.items()
@@ -2880,9 +2897,9 @@ def fusionResultFour(
     boundary_mask = np.zeros((s, m, n), dtype=bool)
     volmin = 65535
 
-    for ll in allList:
+    for l in allList:
         volmin = min(
-            np.load(os.path.join(info_path, ll, "info.npy"), allow_pickle=True).item()[
+            np.load(os.path.join(info_path, l, "info.npy"), allow_pickle=True).item()[
                 "minvol"
             ],
             volmin,
@@ -2911,10 +2928,10 @@ def fusionResultFour(
 
         List = np.zeros((5, 1, m, n), dtype=np.float32)
 
-        tmp1 = (mask_front[ii] == 0) * (mask_ztop[ii] == 0)  # top+front
-        tmp2 = (mask_front[ii] == 1) * (mask_zbottom[ii] == 0)  # bottom+front
-        tmp3 = (mask_back[ii] == 0) * (mask_ztop[ii] == 1)  # top+back
-        tmp4 = (mask_back[ii] == 1) * (mask_zbottom[ii] == 1)  # bottom+back
+        tmp1 = (mask_front[ii] == 0) * (mask_ztop[ii] == 0)  ###top+front
+        tmp2 = (mask_front[ii] == 1) * (mask_zbottom[ii] == 0)  ###bottom+front
+        tmp3 = (mask_back[ii] == 0) * (mask_ztop[ii] == 1)  ###top+back
+        tmp4 = (mask_back[ii] == 1) * (mask_zbottom[ii] == 1)  ###bottom+back
 
         vnameList = ["1", "2", "3", "4"]
 
@@ -3009,7 +3026,7 @@ def fusionResultFour(
     if s_f < s_b:
         illu_front = np.concatenate((illu_front, illu_back[-(s_b - s_f) :, :, :]), 0)
 
-    l_temp = np.concatenate(
+    l = np.concatenate(
         (
             np.arange(GFr[0] // 2, 0, -1),
             np.arange(s),
@@ -3018,37 +3035,66 @@ def fusionResultFour(
         0,
     )
 
-    for ii in tqdm.tqdm(range(2, len(l_temp) - 2), desc="fusion: "):  # topVol.shape[0]
-        l_s = l_temp[ii - GFr[0] // 2 : ii + GFr[0] // 2 + 1]
+    for ii in tqdm.tqdm(range(2, len(l) - 2), desc="fusion: "):  # topVol.shape[0]
+        l_s = l[ii - GFr[0] // 2 : ii + GFr[0] // 2 + 1]
 
         bottomMask = 1 - boundary_mask[None, l_s, :, :]
         topMask = boundary_mask[None, l_s, :, :]
 
         ind = ii - GFr[0] // 2
-
-        a, b, c = fusion_perslice(
-            illu_front[l_s, :, :].astype(np.float32)[None],
-            illu_back[l_s, :, :].astype(np.float32)[None],
-            topMask,
-            bottomMask,
+        if save_separate_results:
+            data = np.stack(
+                (
+                    illu_front[l_s, :, :].astype(np.float32),
+                    illu_front[l_s, :, :].astype(np.float32),
+                    illu_back[l_s, :, :].astype(np.float32),
+                    illu_back[l_s, :, :].astype(np.float32),
+                ),
+                0,
+            )
+            mask = np.concatenate(
+                (
+                    topMask * (1 - mask_front[None, l_s, :, :]),
+                    topMask * mask_front[None, l_s, :, :],
+                    bottomMask * (1 - mask_back[None, l_s, :, :]),
+                    bottomMask * mask_back[None, l_s, :, :],
+                ),
+                0,
+            )
+        else:
+            data = np.stack(
+                (
+                    illu_front[l_s, :, :].astype(np.float32),
+                    illu_back[l_s, :, :].astype(np.float32),
+                ),
+                0,
+            )
+            mask = np.concatenate(
+                (
+                    topMask,
+                    bottomMask,
+                ),
+                0,
+            )
+        a, c = fusion_perslice(
+            data,
+            mask,
             GFr,
             device,
         )
         if save_separate_results:
-            reconVol[ind], reconVol_separate[ind, 0], reconVol_separate[ind, 1] = (
-                a,
-                b,
-                c,
+            np.savez_compressed(
+                os.path.join(
+                    path,
+                    "{:0>{}}".format(ind, 5) + ".npz",
+                ),
+                mask=c.transpose(0, 2, 1) if T_flag else c,
             )
-        else:
-            reconVol[ind] = a
+        reconVol[ind] = a
 
     del mask_front, mask_ztop, mask_back, mask_zbottom
     del illu_front, illu_back
-    if save_separate_results:
-        return reconVol, reconVol_separate
-    else:
-        return reconVol
+    return reconVol
 
 
 def volumeTranslate_compose(

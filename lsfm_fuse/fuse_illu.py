@@ -286,7 +286,6 @@ class FUSE_illu:
             rawPlanes_bottom = rawPlanes_bottom[::-1, :, :]
 
         print("\nLocalize sample...")
-        print(save_separate_results)
         cropInfo, MIP_info = self.localizingSample(rawPlanes_top, rawPlanes_bottom)
         print(cropInfo)
         if self.train_params["require_precropping"]:
@@ -466,36 +465,50 @@ class FUSE_illu:
         ).astype(np.float32)
         if cam_pos == "back":
             boundaryE = boundaryE[::-1, :]
+
         if save_separate_results:
-            recon, reconVol_separate = fusionResult(
-                rawPlanes_top,
-                rawPlanes_bottom,
-                copy.deepcopy(boundaryE),
-                self.train_params["device"],
-                save_separate_results,
-                GFr=copy.deepcopy(self.train_params["window_size"]),
+            if os.path.exists(
+                os.path.join(
+                    save_path,
+                    self.sample_params["topillu_saving_name"],
+                    "fuse_illu_mask",
+                )
+            ):
+                shutil.rmtree(
+                    os.path.join(
+                        save_path,
+                        self.sample_params["topillu_saving_name"],
+                        "fuse_illu_mask",
+                    )
+                )
+            os.makedirs(
+                os.path.join(
+                    save_path,
+                    self.sample_params["topillu_saving_name"],
+                    "fuse_illu_mask",
+                )
             )
-        else:
-            recon = fusionResult(
-                rawPlanes_top,
-                rawPlanes_bottom,
-                copy.deepcopy(boundaryE),
-                self.train_params["device"],
-                save_separate_results,
-                GFr=copy.deepcopy(self.train_params["window_size"]),
-            )
+
+        recon = fusionResult(
+            T_flag,
+            rawPlanes_top,
+            rawPlanes_bottom,
+            copy.deepcopy(boundaryE),
+            self.train_params["device"],
+            save_separate_results,
+            path=os.path.join(
+                save_path,
+                self.sample_params["topillu_saving_name"],
+                "fuse_illu_mask",
+            ),
+            GFr=copy.deepcopy(self.train_params["window_size"]),
+        )
+
         if T_flag:
             result = recon.transpose(0, 2, 1)
-            if save_separate_results:
-                result_separate = reconVol_separate.transpose(0, 1, 3, 2)
         else:
             result = recon
-            if save_separate_results:
-                result_separate = reconVol_separate
-        if save_separate_results:
-            del recon, reconVol_separate
-        else:
-            del recon
+        del recon
         if display:
             fig, (ax1, ax2) = plt.subplots(1, 2, dpi=200)
             xyMIP = result.max(0)
@@ -507,8 +520,6 @@ class FUSE_illu:
             plt.show()
         if cam_pos == "back":
             result = result[::-1, :, :]
-            if save_separate_results:
-                result_separate = result_separate[::-1, :, :, :]
 
         print("Save...")
         tifffile.imwrite(
@@ -520,17 +531,6 @@ class FUSE_illu:
             ),
             result,
         )
-        if save_separate_results:
-            self.save_results(
-                os.path.join(save_path, self.sample_params["topillu_saving_name"])
-                + "/illuFusionResult_separate{}.tif".format(
-                    ""
-                    if self.train_params["require_segmentation"]
-                    else "_without_segmentation"
-                ),
-                result_separate,
-            )
-            del result_separate
         return result
 
     def save_results(self, save_path, reconVol_separate):
@@ -791,21 +791,22 @@ class FUSE_illu:
 
 
 def fusionResult(
+    T_flag,
     topVol,
     bottomVol,
     boundary,
     device,
     save_separate_results,
+    path,
     GFr=[5, 49],
 ):
     s, m, n = topVol.shape
     boundary = torch.from_numpy(boundary[None, :, None, :]).to(device)
-    if save_separate_results:
-        reconVol_separate = np.empty((s, 2, m, n), dtype=np.uint16)
+
     mask = torch.arange(m, device=device)[None, None, :, None]
     GFr[1] = GFr[1] // 4 * 2 + 1
 
-    l_temp = np.concatenate(
+    l = np.concatenate(
         (
             np.arange(GFr[0] // 2, 0, -1),
             np.arange(s),
@@ -816,9 +817,9 @@ def fusionResult(
     recon = np.zeros(topVol.shape, dtype=np.uint16)
 
     for ii in tqdm.tqdm(
-        range(GFr[0] // 2, len(l_temp) - GFr[0] // 2), desc="fusion: "
+        range(GFr[0] // 2, len(l) - GFr[0] // 2), desc="fusion: "
     ):  # topVol.shape[0]
-        l_s = l_temp[ii - GFr[0] // 2 : ii + GFr[0] // 2 + 1]
+        l_s = l[ii - GFr[0] // 2 : ii + GFr[0] // 2 + 1]
         boundary_slice = boundary[:, l_s, :, :]
 
         bottomMask = (mask > boundary_slice).to(torch.float)
@@ -826,19 +827,25 @@ def fusionResult(
 
         ind = ii - GFr[0] // 2
 
-        a, b, c = fusion_perslice(
-            topVol[l_s, :, :].astype(np.float32)[None],
-            bottomVol[l_s, :, :].astype(np.float32)[None],
-            topMask,
-            bottomMask,
+        a, c = fusion_perslice(
+            np.stack(
+                (
+                    topVol[l_s, :, :].astype(np.float32),
+                    bottomVol[l_s, :, :].astype(np.float32),
+                ),
+                0,
+            ),
+            torch.cat((topMask, bottomMask), 0),
             GFr,
             device,
         )
         if save_separate_results:
-            recon[ind], reconVol_separate[ind, 0], reconVol_separate[ind, 1] = a, b, c
-        else:
-            recon[ind] = a
-    if save_separate_results:
-        return recon, reconVol_separate
-    else:
-        return recon
+            np.savez_compressed(
+                os.path.join(
+                    path,
+                    "{:0>{}}".format(ind, 5) + ".npz",
+                ),
+                mask=c.transpose(0, 2, 1) if T_flag else c,
+            )
+        recon[ind] = a
+    return recon
